@@ -24,24 +24,73 @@ class LiveAPIBridge:
         self.connected_clients: Set[WebSocketServerProtocol] = set()
         self.active_sessions: Dict[str, any] = {}
         
-    async def handle_client_connection(self, websocket: WebSocketServerProtocol, path: str):
-        """Handle new WebSocket client connections"""
+    async def handle_client_connection(self, websocket: WebSocketServerProtocol, path: str = "/"):
+        """Handle new WebSocket client connections using Gemini Live API protocol"""
         client_id = f"client_{id(websocket)}"
         self.connected_clients.add(websocket)
-        logger.info(f"Client {client_id} connected")
-        
+        logger.info(f"Client {client_id} connected from path: {path}")
         try:
-            # Send welcome message
-            await websocket.send(json.dumps({
-                "type": "connection_established",
-                "client_id": client_id,
-                "message": "Connected to Live API Bridge"
-            }))
-            
-            # Handle messages from this client
-            async for message in websocket:
-                await self.handle_client_message(websocket, client_id, message)
-                
+            # Wait for setup message
+            setup_msg = await websocket.recv()
+            setup_data = json.loads(setup_msg)
+            if "setup" in setup_data:
+                # Parse model and config from setup
+                model = setup_data["setup"].get("model", self.model)
+                config = setup_data["setup"].get("generationConfig", {"responseModalities": ["TEXT"]})
+                system_instruction = setup_data["setup"].get("systemInstruction")
+                tools = setup_data["setup"].get("tools")
+                session_resumption = setup_data["setup"].get("sessionResumption")
+                # Prepare config for Gemini client
+                gemini_config = dict(config)
+                if system_instruction:
+                    gemini_config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
+                if tools:
+                    gemini_config["tools"] = tools
+                if session_resumption:
+                    gemini_config["session_resumption"] = types.SessionResumptionConfig(handle=session_resumption.get("handle"))
+                # Start Gemini session
+                session_cm = self.client.aio.live.connect(model=model, config=gemini_config)
+                session = await session_cm.__aenter__()
+                self.active_sessions[client_id] = {
+                    "session": session,
+                    "session_cm": session_cm,
+                    "websocket": websocket,
+                    "config": gemini_config,
+                    "session_handle": None  # Store session handle for resumption
+                }
+                await websocket.send(json.dumps({"setupComplete": {}}))
+                # Start listening for responses
+                asyncio.create_task(self.listen_to_live_api(client_id))
+            else:
+                await websocket.send(json.dumps({"error": "First message must be setup"}))
+                return
+
+            # Main message loop
+            async for msg in websocket:
+                print(f"[Gemini] Received message from client: {msg}")
+                data = json.loads(msg)
+                if "clientContent" in data:
+                    user_turns = data["clientContent"].get("turns", [])
+                    print(f"[Gemini] Forwarding turns to Gemini: {user_turns}")
+                    turn_complete = data["clientContent"].get("turnComplete", True)
+                    if user_turns and "parts" in user_turns[0] and user_turns[0]["parts"]:
+                        turns = [
+                            types.Content(
+                                role=turn.get("role", "user"),
+                                parts=[types.Part(**part) for part in turn.get("parts", [])]
+                            )
+                            for turn in user_turns
+                        ]
+                        session = self.active_sessions[client_id]["session"]
+                        await session.send_client_content(turns=turns, turn_complete=turn_complete)
+                        print(f"[Gemini] Sent turns to Gemini: {turns}")
+                elif "realtimeInput" in data:
+                    # Handle audio/video/text streaming (not implemented)
+                    pass
+                elif "toolResponse" in data:
+                    # Handle tool/function call responses (not implemented)
+                    pass
+                # ... handle other message types as needed ...
         except websockets.exceptions.ConnectionClosed:
             logger.info(f"Client {client_id} disconnected")
         except Exception as e:
@@ -50,6 +99,12 @@ class LiveAPIBridge:
             self.connected_clients.discard(websocket)
             if client_id in self.active_sessions:
                 # Clean up session
+                try:
+                    session_data = self.active_sessions[client_id]
+                    session_cm = session_data["session_cm"]
+                    await session_cm.__aexit__(None, None, None)
+                except Exception as cleanup_error:
+                    logger.error(f"Error cleaning up session for {client_id}: {cleanup_error}")
                 del self.active_sessions[client_id]
     
     async def handle_client_message(self, websocket: WebSocketServerProtocol, client_id: str, message: str):
@@ -57,6 +112,8 @@ class LiveAPIBridge:
         try:
             data = json.loads(message)
             message_type = data.get("type")
+            
+            logger.info(f"Received message from {client_id}: {message_type}")
             
             if message_type == "start_session":
                 await self.start_live_session(websocket, client_id, data)
@@ -103,10 +160,14 @@ class LiveAPIBridge:
                     {"google_search": {}}
                 ]
             
-            # Create Live API session
-            session = await self.client.aio.live.connect(model=self.model, config=config)
+            logger.info(f"Starting Live API session for {client_id} with config: {config}")
+            
+            # Create Live API session using async context manager
+            session_cm = self.client.aio.live.connect(model=self.model, config=config)
+            session = await session_cm.__aenter__()
             self.active_sessions[client_id] = {
                 "session": session,
+                "session_cm": session_cm,
                 "websocket": websocket,
                 "config": config
             }
@@ -117,7 +178,7 @@ class LiveAPIBridge:
             await websocket.send(json.dumps({
                 "type": "session_started",
                 "client_id": client_id,
-                "config": config
+                "message": "Live API session started successfully"
             }))
             
         except Exception as e:
@@ -138,8 +199,22 @@ class LiveAPIBridge:
         
         try:
             async for response in session.receive():
+                print(f"[Gemini] Raw response for {client_id}: {response}")
+                # Handle session resumption updates
+                if hasattr(response, "session_resumption_update") and response.session_resumption_update:
+                    print(f"[Gemini] SessionResumptionUpdate: {response.session_resumption_update}")
+                    handle = response.session_resumption_update.new_handle
+                    resumable = response.session_resumption_update.resumable
+                    self.active_sessions[client_id]["session_handle"] = handle
+                    await websocket.send(json.dumps({
+                        "type": "session_resumption_update",
+                        "handle": handle,
+                        "resumable": resumable
+                    }))
+                
                 # Handle text responses
-                if response.text is not None:
+                if getattr(response, "text", None) is not None:
+                    print(f"[Gemini] Text chunk: {response.text}")
                     await websocket.send(json.dumps({
                         "type": "text_chunk",
                         "content": response.text,
@@ -147,13 +222,13 @@ class LiveAPIBridge:
                     }))
                 
                 # Handle server content
-                if response.server_content:
+                if getattr(response, "server_content", None):
+                    print(f"[Gemini] Server content: {response.server_content}")
                     if response.server_content.generation_complete:
                         await websocket.send(json.dumps({
                             "type": "generation_complete",
                             "message": "Response generation completed"
                         }))
-                    
                     if response.server_content.interrupted:
                         await websocket.send(json.dumps({
                             "type": "interrupted",
@@ -168,7 +243,7 @@ class LiveAPIBridge:
                     }))
                 
                 # Handle usage metadata
-                if response.usage_metadata:
+                if getattr(response, "usage_metadata", None):
                     usage = response.usage_metadata
                     await websocket.send(json.dumps({
                         "type": "usage_update",
@@ -178,23 +253,29 @@ class LiveAPIBridge:
                                 "modality": getattr(detail, 'modality', 'unknown'),
                                 "token_count": getattr(detail, 'token_count', 0)
                             }
-                            for detail in usage.response_tokens_details
+                            for detail in getattr(usage, 'response_tokens_details', [])
                         ]
                     }))
                 
                 # Handle session warnings
                 if hasattr(response, 'go_away') and response.go_away:
+                    print(f"[Gemini] go_away for {client_id}: time_left={getattr(response.go_away, 'time_left', None)}")
                     await websocket.send(json.dumps({
                         "type": "session_warning",
-                        "message": f"Session ending in: {response.go_away.time_left}"
+                        "message": f"Session ending in: {getattr(response.go_away, 'time_left', None)}",
+                        "go_away": str(response.go_away)
                     }))
-                    
         except Exception as e:
-            logger.error(f"Error listening to Live API for {client_id}: {e}")
-            await websocket.send(json.dumps({
-                "type": "error",
-                "message": f"Live API error: {str(e)}"
-            }))
+            print(f"[Gemini] Error listening to Live API for {client_id}: {e}")
+            if websocket.close_code is None:
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": f"Live API error: {str(e)}"
+                }))
+        finally:
+            # Print WebSocket close reason
+            if websocket.close_code is not None:
+                print(f"[Gemini] WebSocket closed for {client_id} with code {websocket.close_code} and reason: {getattr(websocket, 'close_reason', None)}")
     
     async def send_to_live_api(self, websocket: WebSocketServerProtocol, client_id: str, data: dict):
         """Send message to Live API"""
@@ -209,10 +290,14 @@ class LiveAPIBridge:
             session = self.active_sessions[client_id]["session"]
             message = data.get("message", "")
             
+            logger.info(f"Sending message to Live API for {client_id}: {message[:50]}...")
+            
             # Send to Live API
-            await session.send_client_content(
-                turns={"role": "user", "parts": [{"text": message}]},
-                turn_complete=True
+            await session.send(
+                types.Content(
+                    role="user",
+                    parts=[types.Part(text=message)]
+                )
             )
             
             await websocket.send(json.dumps({
@@ -232,21 +317,24 @@ class LiveAPIBridge:
         if client_id in self.active_sessions:
             try:
                 session_data = self.active_sessions[client_id]
-                session = session_data["session"]
+                session_cm = session_data["session_cm"]
                 websocket = session_data["websocket"]
-                
+                logger.info(f"Ending Live API session for {client_id}")
                 # Close the Live API session
-                await session.__aexit__(None, None, None)
-                
+                await session_cm.__aexit__(None, None, None)
                 await websocket.send(json.dumps({
                     "type": "session_ended",
-                    "message": "Live API session ended"
+                    "client_id": client_id,
+                    "message": "Live API session ended successfully"
                 }))
-                
-                del self.active_sessions[client_id]
-                
             except Exception as e:
                 logger.error(f"Error ending session for {client_id}: {e}")
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": f"Failed to end session: {str(e)}"
+                }))
+            finally:
+                del self.active_sessions[client_id]
     
     async def configure_session(self, websocket: WebSocketServerProtocol, client_id: str, data: dict):
         """Configure session parameters"""
@@ -260,8 +348,8 @@ class LiveAPIBridge:
 
 async def main():
     """Main server function"""
-    # Get API key from environment variable
-    api_key = os.getenv("GEMINI_API_KEY")
+    # Get API key from environment variable or use the hardcoded one
+    api_key = os.getenv('GEMINI_API_KEY')
     if not api_key:
         logger.error("GEMINI_API_KEY environment variable not set")
         return
@@ -275,16 +363,19 @@ async def main():
     
     logger.info(f"Starting WebSocket server on {host}:{port}")
     
-    async with websockets.serve(
+    # Fix: Pass the method directly, websockets will handle the arguments
+    server = await websockets.serve(
         bridge.handle_client_connection,
         host,
         port,
         ping_interval=20,
         ping_timeout=10
-    ):
-        logger.info("WebSocket server started successfully")
-        logger.info("Waiting for client connections...")
-        await asyncio.Future()  # Keep server running
+    )
+    
+    logger.info("WebSocket server started successfully")
+    logger.info("Waiting for client connections...")
+    await asyncio.Future()  # Keep server running
+    
 
 if __name__ == "__main__":
     try:
@@ -293,9 +384,3 @@ if __name__ == "__main__":
         logger.info("Server shutting down...")
     except Exception as e:
         logger.error(f"Server error: {e}")
-
-# Usage Instructions:
-# 1. Install dependencies: pip install websockets google-genai
-# 2. Set environment variable: export GEMINI_API_KEY="your_api_key_here"
-# 3. Run the server: python websocket_server.py
-# 4. Connect frontend clients to ws://localhost:8765
