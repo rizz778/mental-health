@@ -7,13 +7,18 @@ from contextlib import asynccontextmanager
 import uuid
 import structlog
 from datetime import datetime, date
-from datetime import datetime, date
 from server.core.config import settings
 from server.core.database import database
 from server.core.logging import setup_logging, get_logger
 from server.core.exceptions import AppException
 from server.core.handlers import app_exception_handler, validation_exception_handler, generic_exception_handler
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+import os
+import logging
+import asyncio
+import websockets
+from server.api.ws.router import WebSocketHandler
+from services.gemini_service import GeminiService
 
 
 @asynccontextmanager
@@ -75,3 +80,38 @@ app.include_router
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+async def main():
+    api_key = os.getenv('GEMINI_API_KEY')
+    if not api_key:
+        logger.error("GEMINI_API_KEY environment variable not set")
+        return
+
+    gemini_service = GeminiService(api_key)
+    active_sessions = {}
+    ws_handler = WebSocketHandler(gemini_service, active_sessions)
+
+    host = "localhost"
+    port = 8765
+    logger.info(f"Starting WebSocket server on {host}:{port}")
+    server = await websockets.serve(
+        ws_handler.handle_client_connection,
+        host,
+        port,
+        ping_interval=20,
+        ping_timeout=10
+    )
+    logger.info("WebSocket server started successfully")
+    logger.info("Waiting for client connections...")
+    await asyncio.Future()  # Keep server running
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Server shutting down...")
+    except Exception as e:
+        logger.error(f"Server error: {e}")
