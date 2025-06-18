@@ -72,18 +72,25 @@ class LiveAPIBridge:
                 if "clientContent" in data:
                     user_turns = data["clientContent"].get("turns", [])
                     print(f"[Gemini] Forwarding turns to Gemini: {user_turns}")
+                    # Log each turn's role and text for debugging
+                    for idx, turn in enumerate(user_turns):
+                        print(f"[Gemini] Turn {idx}: role={turn.get('role')}, text={[part.get('text') for part in turn.get('parts', [])]}")
                     turn_complete = data["clientContent"].get("turnComplete", True)
                     if user_turns and "parts" in user_turns[0] and user_turns[0]["parts"]:
-                        turns = [
-                            types.Content(
-                                role=turn.get("role", "user"),
-                                parts=[types.Part(**part) for part in turn.get("parts", [])]
-                            )
-                            for turn in user_turns
-                        ]
-                        session = self.active_sessions[client_id]["session"]
-                        await session.send_client_content(turns=turns, turn_complete=turn_complete)
-                        print(f"[Gemini] Sent turns to Gemini: {turns}")
+                        try:
+                            turns = [
+                                types.Content(
+                                    role=turn.get("role", "user"),
+                                    parts=[types.Part(**part) for part in turn.get("parts", [])]
+                                )
+                                for turn in user_turns
+                            ]
+                            print(f"[Gemini] Constructed Gemini turns: {[{'role': t.role, 'parts': [p.text for p in t.parts]} for t in turns]}")
+                            session = self.active_sessions[client_id]["session"]
+                            await session.send_client_content(turns=turns, turn_complete=turn_complete)
+                            print(f"[Gemini] Sent turns to Gemini: {turns}")
+                        except Exception as e:
+                            print(f"[Gemini] ERROR constructing or sending turns: {e}")
                 elif "realtimeInput" in data:
                     # Handle audio/video/text streaming (not implemented)
                     pass

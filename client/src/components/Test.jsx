@@ -49,7 +49,7 @@ const Test = () => {
   
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isTyping]);
+  }, [messages, isTyping, currentResponse]);
   
   // Auto-hide status messages
   useEffect(() => {
@@ -68,25 +68,39 @@ const Test = () => {
   
   // WebSocket message handler
   const handleServerMessage = useCallback((data) => {
-    console.log('[Gemini] handleServerMessage received:', data);
+    console.log('[Client] Received server message:', data);
+
+    // Handle serverContent from Gemini Live API
     if (data.serverContent) {
       const modelTurn = data.serverContent.modelTurn;
       if (modelTurn && modelTurn.parts && modelTurn.parts.length > 0) {
         const text = modelTurn.parts[0].text;
-        setIsTyping(false);
-        addMessage('assistant', text); // Ensure assistant responses are always added
-        setCurrentResponse('');
-        console.log('[Gemini] Assistant/model response added:', text);
+        setCurrentResponse(prev => {
+          const updated = prev + text;
+          currentResponseRef.current = updated;
+          console.log('[Client] Updated currentResponse:', updated);
+          return updated;
+        });
+        setIsTyping(true);
+        console.log('[Client] Model response chunk received:', text);
       }
       if (data.serverContent.generationComplete) {
+        if (currentResponseRef.current) {
+          addMessage('model', currentResponseRef.current);
+          console.log('[Client] Model response finalized:', currentResponseRef.current);
+        }
+        setCurrentResponse('');
+        currentResponseRef.current = '';
         setIsTyping(false);
-        console.log('[Gemini] Generation complete');
+        console.log('[Client] Generation complete');
       }
       if (data.serverContent.turnComplete) {
-        console.log('[Gemini] Turn complete');
+        console.log('[Client] Turn complete');
       }
       return;
     }
+    
+    // Handle other message types
     switch (data.type) {
       case 'connection_established':
         showSuccess(data.message || 'Connected to Live API Bridge');
@@ -94,7 +108,7 @@ const Test = () => {
         
       case 'session_started':
         setHasActiveSession(true);
-        setSuccessMessage('Session started successfully');
+        showSuccess('Session started successfully');
         addSystemMessage('Session started - You can now send messages');
         break;
         
@@ -104,6 +118,7 @@ const Test = () => {
         break;
         
       case 'text_chunk':
+        // Handle streaming text from the model
         if (!data.complete) {
           setIsTyping(true);
           setCurrentResponse(prev => {
@@ -111,23 +126,26 @@ const Test = () => {
             currentResponseRef.current = updated;
             return updated;
           });
-          console.log('[Gemini] Streaming text_chunk:', data.content);
+          console.log('[Client] Streaming text chunk:', data.content);
         }
         break;
+        
       case 'generation_complete':
+        console.log('[Client] Generation complete - finalizing response');
         setIsTyping(false);
+        
+        // Only add message if we have accumulated response and no serverContent message handled it
         if (currentResponseRef.current) {
           addMessage('assistant', currentResponseRef.current);
-          console.log('[Gemini] Assistant response finalized:', currentResponseRef.current);
-          setCurrentResponse('');
-          currentResponseRef.current = '';
+          console.log('[Client] Assistant response finalized:', currentResponseRef.current);
         }
-        console.log('[Gemini] Generation complete');
+        
+        setCurrentResponse('');
+        currentResponseRef.current = '';
         break;
         
       case 'message_sent':
-        // Acknowledgment that message was sent to Live API
-        console.log('Message sent to Live API');
+        console.log('[Client] Message acknowledged by server');
         break;
         
       case 'usage_update':
@@ -142,6 +160,8 @@ const Test = () => {
         
       case 'interrupted':
         setIsTyping(false);
+        setCurrentResponse('');
+        currentResponseRef.current = '';
         addSystemMessage('Generation was interrupted');
         break;
         
@@ -155,7 +175,9 @@ const Test = () => {
         
       case 'error':
         setIsTyping(false);
-        setErrorMessage(data.message || 'An error occurred');
+        setCurrentResponse('');
+        currentResponseRef.current = '';
+        showError(data.message || 'An error occurred');
         break;
         
       case 'session_resumption_update':
@@ -163,22 +185,24 @@ const Test = () => {
           setSessionHandle(data.handle);
           addSystemMessage('Session can be resumed.');
         }
-        return;
+        break;
         
       default:
-        console.log('Unhandled message type:', data.type, data);
+        console.log('[Client] Unhandled message type:', data.type, data);
     }
-  }, [currentResponse]);
+  }, []);
   
   // Helper functions
   const addMessage = (type, content) => {
+    // Only allow 'user', 'model', or 'system' types
+    if (type !== 'user' && type !== 'model' && type !== 'system') return;
     const newMessage = {
       id: messageIdRef.current++,
       type,
       content,
       timestamp: new Date()
     };
-    console.log('[Gemini] addMessage:', newMessage);
+    console.log('[Client] Adding message:', newMessage);
     setMessages(prev => [...prev, newMessage]);
   };
   
@@ -188,32 +212,49 @@ const Test = () => {
   
   const showError = (message) => {
     setErrorMessage(message);
+    console.error('[Client] Error:', message);
   };
   
   const showSuccess = (message) => {
     setSuccessMessage(message);
+    console.log('[Client] Success:', message);
   };
   
   const sendToServer = (message) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log('[Client] Sending to server:', message);
       wsRef.current.send(JSON.stringify(message));
     }
   };
   
-  // Helper to build Gemini turns from chat history
-  const buildGeminiTurns = (newUserMessage = null) => {
-    // Only include user and assistant messages, in order
-    const chatTurns = messages
-      .filter(m => m.type === 'user' || m.type === 'assistant')
-      .map(m => ({
-        role: m.type === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      }));
+  // Build conversation turns for Gemini (only include actual conversation messages)
+  const buildConversationTurns = (newUserMessage = null) => {
+    // Only use 'user' and 'model' types, never 'assistant'
+    const conversationMessages = messages.filter(m => m.type === 'user' || m.type === 'model');
+    const turns = [];
+    conversationMessages.forEach(msg => {
+      if (msg.type === 'user') {
+        turns.push({ role: 'user', parts: [{ text: msg.content.trim() }] });
+      } else if (msg.type === 'model') {
+        turns.push({ role: 'model', parts: [{ text: msg.content.trim() }] });
+      }
+    });
     if (newUserMessage) {
-      chatTurns.push({ role: 'user', parts: [{ text: newUserMessage }] });
+      turns.push({ role: 'user', parts: [{ text: newUserMessage.trim() }] });
     }
-    console.log('[Gemini] buildGeminiTurns: messages:', messages, 'turns:', chatTurns);
-    return chatTurns;
+    // Enforce strict alternation: user, model, user, model...
+    // Remove any duplicate roles in a row
+    let lastRole = null;
+    const filteredTurns = [];
+    for (const turn of turns) {
+      if (turn.role !== lastRole) {
+        filteredTurns.push(turn);
+        lastRole = turn.role;
+      }
+    }
+
+    console.log('[Client] Built conversation turns:', filteredTurns);
+    return filteredTurns;
   };
   
   // Connection handlers
@@ -231,7 +272,8 @@ const Test = () => {
         setIsConnected(true);
         setConnectionStatus('Connected');
         showSuccess('Connected to WebSocket server');
-        // Send Gemini Live API setup message as the first message
+        
+        // Send initial setup message
         const setupMsg = {
           setup: {
             model: 'models/gemini-2.0-flash-live-001',
@@ -243,29 +285,39 @@ const Test = () => {
             ...(sessionHandle ? { sessionResumption: { handle: sessionHandle } } : {})
           }
         };
+        
+        console.log('[Client] Sending setup message:', setupMsg);
         wsRef.current.send(JSON.stringify(setupMsg));
-        console.log('[Gemini] Setup message sent:', setupMsg);
       };
 
       wsRef.current.onmessage = (event) => {
-        handleServerMessage(JSON.parse(event.data));
+        try {
+          const data = JSON.parse(event.data);
+          handleServerMessage(data);
+        } catch (error) {
+          console.error('[Client] Error parsing server message:', error);
+        }
       };
 
-      wsRef.current.onclose = () => {
+      wsRef.current.onclose = (event) => {
         setIsConnected(false);
         setHasActiveSession(false);
         setConnectionStatus('Disconnected');
-        addSystemMessage('Disconnected from server');
-        console.log('[Gemini] Connection closed');
+        setIsTyping(false);
+        setCurrentResponse('');
+        currentResponseRef.current = '';
+        addSystemMessage(`Disconnected from server (Code: ${event.code})`);
+        console.log('[Client] WebSocket closed:', event.code, event.reason);
       };
 
       wsRef.current.onerror = (error) => {
         showError('WebSocket connection error');
-        console.error('WebSocket error:', error);
+        console.error('[Client] WebSocket error:', error);
       };
 
     } catch (error) {
       showError('Failed to connect: ' + error.message);
+      console.error('[Client] Connection error:', error);
     }
   };
   
@@ -273,7 +325,7 @@ const Test = () => {
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
-      console.log('[Gemini] Disconnected from WebSocket server');
+      console.log('[Client] Manually disconnected from WebSocket server');
     }
   };
   
@@ -283,17 +335,26 @@ const Test = () => {
       showError('Not connected to server');
       return;
     }
+    
     const message = messageInput.trim() || 'Hello!';
+    const turns = buildConversationTurns(message);
+    
     const payload = {
       clientContent: {
-        turns: buildGeminiTurns(message),
+        turns: turns,
         turnComplete: true
       }
     };
-    console.log('[Gemini] Sending startSession payload:', payload);
+    
+    console.log('[Client] Starting session with payload:', payload);
     sendToServer(payload);
-    setHasActiveSession(true);
-    addSystemMessage('Session started - You can now send messages');
+    
+    // Add user message and prepare for response
+    addMessage('user', message);
+    setMessageInput('');
+    setIsTyping(true);
+    setCurrentResponse('');
+    currentResponseRef.current = '';
   };
   
   const endSession = async () => {
@@ -302,32 +363,44 @@ const Test = () => {
     sendToServer({
       type: "end_session"
     });
-    console.log('[Gemini] End session sent');
+    console.log('[Client] End session request sent');
   };
   
   // Message handlers
   const sendMessage = async () => {
     const message = messageInput.trim();
-    if (!message || !hasActiveSession || isTyping) return; // Prevent sending while waiting for model
-    const turns = buildGeminiTurns(message);
+    if (!message || !hasActiveSession || isTyping) {
+      console.log('[Client] Cannot send message:', { message: !!message, hasActiveSession, isTyping });
+      return;
+    }
+    
+    const turns = buildConversationTurns(message);
     const payload = {
       clientContent: {
-        turns,
+        turns: turns,
         turnComplete: true
       }
     };
-    console.log('[Gemini] Sending sendMessage payload:', payload);
+    
+    console.log('[Client] Sending message with payload:', payload);
     sendToServer(payload);
+    
+    // Add user message and prepare for response
     addMessage('user', message);
     setMessageInput('');
     setIsTyping(true);
     setCurrentResponse('');
+    currentResponseRef.current = '';
   };
   
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      if (hasActiveSession) {
+        sendMessage();
+      } else {
+        startSession();
+      }
     }
   };
   
@@ -348,28 +421,18 @@ const Test = () => {
     }]);
     messageIdRef.current = 2;
     setTotalTokens(0);
-    setSessionHandle(null); // Clear session handle on chat clear
-    console.log('[Gemini] Chat cleared');
+    setSessionHandle(null);
+    setCurrentResponse('');
+    currentResponseRef.current = '';
+    setIsTyping(false);
+    console.log('[Client] Chat cleared');
   };
   
   const saveConfig = () => {
     showSuccess('Configuration saved');
     setShowConfig(false);
-    console.log('[Gemini] Configuration saved:', { systemInstruction, wsUrl, toolsEnabled });
+    console.log('[Client] Configuration saved:', { systemInstruction, wsUrl, toolsEnabled });
   };
-  
-  // Log state changes
-  useEffect(() => {
-    console.log('[Gemini] Messages state updated:', messages);
-  }, [messages]);
-  
-  useEffect(() => {
-    console.log('[Gemini] isTyping state:', isTyping);
-  }, [isTyping]);
-  
-  useEffect(() => {
-    console.log('[Gemini] hasActiveSession state:', hasActiveSession);
-  }, [hasActiveSession]);
   
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-400 via-purple-500 to-purple-700 flex items-center justify-center p-5">
@@ -513,8 +576,18 @@ const Test = () => {
             </div>
           ))}
           
+          {/* Current Streaming Response */}
+          {currentResponse && (
+            <div className="text-left animate-in slide-in-from-bottom duration-300">
+              <div className="inline-block max-w-[70%] bg-white border border-gray-200 p-3 rounded-2xl text-sm leading-relaxed text-gray-800">
+                {currentResponse}
+                <span className="inline-block w-2 h-4 bg-blue-500 ml-1 animate-pulse"></span>
+              </div>
+            </div>
+          )}
+          
           {/* Typing Indicator */}
-          {isTyping && (
+          {isTyping && !currentResponse && (
             <div className="text-left animate-in slide-in-from-bottom duration-300">
               <div className="inline-block bg-white border border-gray-200 p-3 rounded-2xl">
                 <div className="flex gap-1">
@@ -522,15 +595,6 @@ const Test = () => {
                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                 </div>
-              </div>
-            </div>
-          )}
-          
-          {/* Current Response */}
-          {currentResponse && (
-            <div className="text-left animate-in slide-in-from-bottom duration-300">
-              <div className="inline-block max-w-[70%] bg-white border border-gray-200 p-3 rounded-2xl text-sm leading-relaxed text-gray-800">
-                {currentResponse}
               </div>
             </div>
           )}
@@ -545,14 +609,14 @@ const Test = () => {
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type your message here..."
-              disabled={!hasActiveSession || isTyping}
+              placeholder={hasActiveSession ? "Type your message here..." : "Type your first message to start session..."}
+              disabled={!isConnected || isTyping}
               className="w-full min-h-[44px] max-h-32 p-3 border-2 border-gray-200 rounded-3xl text-sm resize-none outline-none focus:border-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
           <button
-            onClick={sendMessage}
-            disabled={!hasActiveSession || !messageInput.trim() || isTyping}
+            onClick={hasActiveSession ? sendMessage : startSession}
+            disabled={!isConnected || !messageInput.trim() || isTyping}
             className="w-11 h-11 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full flex items-center justify-center text-lg hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
           >
             ➤
@@ -563,6 +627,7 @@ const Test = () => {
         <div className="p-3 bg-black/5 text-xs text-gray-600 flex justify-between items-center">
           <span>Tokens: {totalTokens}</span>
           <span>Session: {hasActiveSession ? 'Active' : 'Inactive'}</span>
+          <span>Status: {isTyping ? 'Waiting for response...' : 'Ready'}</span>
         </div>
       </div>
     </div>
