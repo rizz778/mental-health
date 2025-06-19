@@ -7,31 +7,24 @@ from contextlib import asynccontextmanager
 import uuid
 import structlog
 from datetime import datetime, date
-from server.core.config import settings
-from server.core.database import database
-from server.core.logging import setup_logging, get_logger
-from server.core.exceptions import AppException
-from server.core.handlers import app_exception_handler, validation_exception_handler, generic_exception_handler
+from core.config import settings
+from core.logging import setup_logging, get_logger
+from core.exceptions import AppException
+from core.handlers import app_exception_handler, validation_exception_handler, generic_exception_handler
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 import os
 import logging
 import asyncio
 import websockets
-from server.api.ws.router import WebSocketHandler
+from api.ws.router import WebSocketHandler
 from services.gemini_service import GeminiService
 
 
-@asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     setup_logging()
     logger = get_logger(__name__)
-    
-    
-    
-    # Shutdown
-    database.disconnect()
     logger.info("Application shutdown complete")
 
 class CustomJSONResponse(JSONResponse):
@@ -85,12 +78,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 async def main():
-    api_key = os.getenv('GEMINI_API_KEY')
-    if not api_key:
-        logger.error("GEMINI_API_KEY environment variable not set")
-        return
+    # api_key = os.getenv('GEMINI_API_KEY','AIzaSyA7305RGIlw82ON0bC994O_YHh4Kklc_aI')
+    # if not api_key:
+    #     logger.error("GEMINI_API_KEY environment variable not set")
+    #     return
 
-    gemini_service = GeminiService(api_key)
+    gemini_service = GeminiService('AIzaSyA7305RGIlw82ON0bC994O_YHh4Kklc_aI')
     active_sessions = {}
     ws_handler = WebSocketHandler(gemini_service, active_sessions)
 
