@@ -1,7 +1,12 @@
 import asyncio
 import json
 import logging
+import base64
+import numpy as np
+import cv2
+
 from services.gemini_service import GeminiService
+from services.emotion_service import EmotionService
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +17,7 @@ def get_config_from_setup(setup_data, default_model):
     tools = setup_data.get("tools")
     session_resumption = setup_data.get("sessionResumption")
     gemini_config = dict(config)
+
     if system_instruction:
         from google.genai import types
         gemini_config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
@@ -23,9 +29,10 @@ def get_config_from_setup(setup_data, default_model):
     return model, gemini_config
 
 class WebSocketHandler:
-    def __init__(self, gemini_service, active_sessions):
+    def __init__(self, gemini_service: GeminiService, active_sessions: dict, emotion_service: EmotionService):
         self.gemini_service = gemini_service
         self.active_sessions = active_sessions
+        self.emotion_service = emotion_service  # Injected instance
 
     async def handle_client_connection(self, websocket, path="/"):
         client_id = f"client_{id(websocket)}"
@@ -33,6 +40,7 @@ class WebSocketHandler:
         try:
             setup_msg = await websocket.recv()
             setup_data = json.loads(setup_msg)
+
             if "setup" in setup_data:
                 model, gemini_config = get_config_from_setup(setup_data["setup"], self.gemini_service.model)
                 session, session_cm = await self.gemini_service.start_session(gemini_config)
@@ -44,25 +52,59 @@ class WebSocketHandler:
                     "session_handle": None
                 }
                 await websocket.send(json.dumps({"setupComplete": {}}))
-                asyncio.create_task(self.gemini_service.receive_responses(session, websocket, client_id, self.active_sessions))
+                asyncio.create_task(
+                    self.gemini_service.receive_responses(session, websocket, client_id, self.active_sessions)
+                )
             else:
                 await websocket.send(json.dumps({"error": "First message must be setup"}))
                 return
 
             async for msg in websocket:
-                logger.info(f"[Gemini] Received message from client: {msg}")
-                data = json.loads(msg)
+                logger.info(f"[WebSocket] Received message: {msg}")
+                try:
+                    data = json.loads(msg)
+                except json.JSONDecodeError:
+                    await websocket.send(json.dumps({"error": "Invalid JSON"}))
+                    continue
+
+                # 1. Text input for Gemini
                 if "clientContent" in data:
                     user_turns = data["clientContent"].get("turns", [])
-                    logger.info(f"[Gemini] Forwarding turns to Gemini: {user_turns}")
                     turn_complete = data["clientContent"].get("turnComplete", True)
                     if user_turns and "parts" in user_turns[0] and user_turns[0]["parts"]:
                         try:
-                            await self.gemini_service.send_client_content(self.active_sessions[client_id]["session"], user_turns, turn_complete)
-                            logger.info(f"[Gemini] Sent turns to Gemini: {user_turns}")
+                            await self.gemini_service.send_client_content(
+                                self.active_sessions[client_id]["session"],
+                                user_turns,
+                                turn_complete
+                            )
                         except Exception as e:
-                            logger.error(f"[Gemini] ERROR constructing or sending turns: {e}")
-                # ... handle other message types as needed ...
+                            logger.error(f"[Gemini] Error sending turns: {e}")
+
+                # 2. Emotion frame (base64-encoded)
+                elif "frame" in data:
+                    try:
+                        frame_b64 = data["frame"]
+                        np_arr = np.frombuffer(base64.b64decode(frame_b64), np.uint8)
+                        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+                        current_emotion = self.emotion_service.analyze_frame(frame)
+                        aggregated = self.emotion_service.get_aggregated_emotion()
+
+                        await websocket.send(json.dumps({
+                            "emotion": {
+                                "current": current_emotion,
+                                "aggregated": aggregated
+                            }
+                        }))
+                    except Exception as e:
+                        logger.error(f"[Emotion] Error processing frame: {e}")
+                        await websocket.send(json.dumps({"error": "Emotion processing failed"}))
+
+                # 3. Other unsupported message types
+                else:
+                    await websocket.send(json.dumps({"error": "Unsupported message format"}))
+
         except Exception as e:
             logger.error(f"Error handling client {client_id}: {e}")
         finally:
