@@ -91,3 +91,4 @@ class GeminiService:
                     "type": "error",
                     "message": f"Live API error: {str(e)}"
                 }))
+    

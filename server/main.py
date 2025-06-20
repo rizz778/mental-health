@@ -78,12 +78,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 async def main():
-    # api_key = os.getenv('GEMINI_API_KEY','AIzaSyA7305RGIlw82ON0bC994O_YHh4Kklc_aI')
-    # if not api_key:
-    #     logger.error("GEMINI_API_KEY environment variable not set")
-    #     return
+    
 
-    gemini_service = GeminiService('AIzaSyA7305RGIlw82ON0bC994O_YHh4Kklc_aI')
+    gemini_service = GeminiService()
     active_sessions = {}
     ws_handler = WebSocketHandler(gemini_service, active_sessions)
 
