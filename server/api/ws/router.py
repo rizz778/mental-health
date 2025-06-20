@@ -6,7 +6,7 @@ import numpy as np
 import cv2
 
 from services.gemini_service import GeminiService
-from services.emotion_service import EmotionService
+# from services.emotion_service import EmotionService
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +29,10 @@ def get_config_from_setup(setup_data, default_model):
     return model, gemini_config
 
 class WebSocketHandler:
-    def __init__(self, gemini_service: GeminiService, active_sessions: dict, emotion_service: EmotionService):
+    def __init__(self, gemini_service: GeminiService, active_sessions: dict):
         self.gemini_service = gemini_service
         self.active_sessions = active_sessions
-        self.emotion_service = emotion_service  # Injected instance
+        
 
     async def handle_client_connection(self, websocket, path="/"):
         client_id = f"client_{id(websocket)}"
@@ -73,8 +73,10 @@ class WebSocketHandler:
                     turn_complete = data["clientContent"].get("turnComplete", True)
                     if user_turns and "parts" in user_turns[0] and user_turns[0]["parts"]:
                         try:
+                            # Always fetch the latest session (for forced reconnect/heartbeat)
+                            session = self.active_sessions[client_id]["session"]
                             await self.gemini_service.send_client_content(
-                                self.active_sessions[client_id]["session"],
+                                session,
                                 user_turns,
                                 turn_complete
                             )

@@ -41,7 +41,9 @@ const Test = () => {
   
   // Session resumption handle
   const [sessionHandle, setSessionHandle] = useState(null);
-  
+  //Auto Reconnect
+  const [resumeHandle, setResumeHandle] = useState(null);
+const [shouldReconnect, setShouldReconnect] = useState(false);
   // Auto-scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -66,10 +68,24 @@ const Test = () => {
     }
   }, [successMessage]);
   
+  useEffect(() => {
+    if (shouldReconnect && resumeHandle) {
+      setShouldReconnect(false);
+      // Wait a moment to ensure the socket is closed before reconnecting
+      setTimeout(() => {
+        console.log('[Client] Triggering session reconnect with resume handle:', resumeHandle);
+        connect(true); // Pass a flag to indicate resumption
+      }, 500);
+    }
+  }, [shouldReconnect, resumeHandle]);
   // WebSocket message handler
   const handleServerMessage = useCallback((data) => {
-    console.log('[Client] Received server message:', data);
-
+    // Only log session reconnect events
+    if (data.type === 'session_warning' && data.resume_handle) {
+      setResumeHandle(data.resume_handle);
+      setShouldReconnect(true);
+      addSystemMessage('Session expiring, reconnecting to resume...');
+    }
     // Handle serverContent from Gemini Live API
     if (data.serverContent) {
       const modelTurn = data.serverContent.modelTurn;
@@ -78,28 +94,29 @@ const Test = () => {
         setCurrentResponse(prev => {
           const updated = prev + text;
           currentResponseRef.current = updated;
-          console.log('[Client] Updated currentResponse:', updated);
           return updated;
         });
         setIsTyping(true);
-        console.log('[Client] Model response chunk received:', text);
       }
       if (data.serverContent.generationComplete) {
         if (currentResponseRef.current) {
           addMessage('model', currentResponseRef.current);
-          console.log('[Client] Model response finalized:', currentResponseRef.current);
         }
         setCurrentResponse('');
         currentResponseRef.current = '';
         setIsTyping(false);
-        console.log('[Client] Generation complete');
       }
       if (data.serverContent.turnComplete) {
         console.log('[Client] Turn complete');
       }
       return;
     }
-    
+    // Handle setupComplete to mark session as active
+    if (data.setupComplete !== undefined) {
+      setHasActiveSession(true);
+      addSystemMessage('Session setup complete - You can now send messages');
+      return;
+    }
     // Handle other message types
     switch (data.type) {
       case 'connection_established':
@@ -119,6 +136,7 @@ const Test = () => {
         
       case 'text_chunk':
         // Handle streaming text from the model
+
         if (!data.complete) {
           setIsTyping(true);
           setCurrentResponse(prev => {
@@ -126,18 +144,15 @@ const Test = () => {
             currentResponseRef.current = updated;
             return updated;
           });
-          console.log('[Client] Streaming text chunk:', data.content);
         }
         break;
         
       case 'generation_complete':
-        console.log('[Client] Generation complete - finalizing response');
         setIsTyping(false);
         
         // Only add message if we have accumulated response and no serverContent message handled it
         if (currentResponseRef.current) {
-          addMessage('assistant', currentResponseRef.current);
-          console.log('[Client] Assistant response finalized:', currentResponseRef.current);
+          addMessage('model', currentResponseRef.current);
         }
         
         setCurrentResponse('');
@@ -202,7 +217,6 @@ const Test = () => {
       content,
       timestamp: new Date()
     };
-    console.log('[Client] Adding message:', newMessage);
     setMessages(prev => [...prev, newMessage]);
   };
   
@@ -217,12 +231,10 @@ const Test = () => {
   
   const showSuccess = (message) => {
     setSuccessMessage(message);
-    console.log('[Client] Success:', message);
   };
   
   const sendToServer = (message) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('[Client] Sending to server:', message);
       wsRef.current.send(JSON.stringify(message));
     }
   };
@@ -253,7 +265,6 @@ const Test = () => {
       }
     }
 
-    console.log('[Client] Built conversation turns:', filteredTurns);
     return filteredTurns;
   };
   
@@ -272,7 +283,6 @@ const Test = () => {
         setIsConnected(true);
         setConnectionStatus('Connected');
         showSuccess('Connected to WebSocket server');
-        
         // Send initial setup message
         const setupMsg = {
           setup: {
@@ -282,12 +292,14 @@ const Test = () => {
             },
             systemInstruction: systemInstruction.trim() || undefined,
             tools: toolsEnabled ? [{}] : undefined,
-            ...(sessionHandle ? { sessionResumption: { handle: sessionHandle } } : {})
+            ...(resumeHandle ? { sessionResumption: { handle: resumeHandle } } : {})
           }
         };
-        
-        console.log('[Client] Sending setup message:', setupMsg);
         wsRef.current.send(JSON.stringify(setupMsg));
+        if (resumeHandle) {
+          console.log('[Client] Reconnected and sent setup with resume handle:', resumeHandle);
+        }
+        setResumeHandle(null);
       };
 
       wsRef.current.onmessage = (event) => {
@@ -307,7 +319,12 @@ const Test = () => {
         setCurrentResponse('');
         currentResponseRef.current = '';
         addSystemMessage(`Disconnected from server (Code: ${event.code})`);
-        console.log('[Client] WebSocket closed:', event.code, event.reason);
+        if (resumeHandle) {
+          console.log('[Client] Disconnected, will attempt to reconnect with resume handle:', resumeHandle);
+          setTimeout(() => {
+            connect(true); // will use resumeHandle in setup
+          }, 500);
+        }
       };
 
       wsRef.current.onerror = (error) => {
@@ -317,7 +334,6 @@ const Test = () => {
 
     } catch (error) {
       showError('Failed to connect: ' + error.message);
-      console.error('[Client] Connection error:', error);
     }
   };
   
@@ -336,7 +352,11 @@ const Test = () => {
       return;
     }
     
-    const message = messageInput.trim() || 'Hello!';
+    const message = messageInput.trim();
+    if (!message) {
+      showError('Please enter a message to start the session.');
+      return;
+    }
     const turns = buildConversationTurns(message);
     
     const payload = {
@@ -608,14 +628,23 @@ const Test = () => {
             <textarea
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
-              onKeyDown={handleKeyDown}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!hasActiveSession) {
+                    startSession();
+                  } else {
+                    sendMessage();
+                  }
+                }
+              }}
               placeholder={hasActiveSession ? "Type your message here..." : "Type your first message to start session..."}
               disabled={!isConnected || isTyping}
               className="w-full min-h-[44px] max-h-32 p-3 border-2 border-gray-200 rounded-3xl text-sm resize-none outline-none focus:border-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
           <button
-            onClick={hasActiveSession ? sendMessage : startSession}
+            onClick={!hasActiveSession ? startSession : sendMessage}
             disabled={!isConnected || !messageInput.trim() || isTyping}
             className="w-11 h-11 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full flex items-center justify-center text-lg hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
           >

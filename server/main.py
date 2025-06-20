@@ -19,7 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from api.ws.router import WebSocketHandler
 from services.gemini_service import GeminiService
-from services.emotion_service import EmotionService  # NEW IMPORT
+# from services.emotion_service import EmotionService  # NEW IMPORT
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -78,10 +78,10 @@ logger = logging.getLogger(__name__)
 async def main():
     
 
-    gemini_service = GeminiService()
-    emotion_service = EmotionService()  # Instantiate EmotionService
+    gemini_service = GeminiService('')
+    # emotion_service = EmotionService()  # Instantiate EmotionService
     active_sessions = {}
-    ws_handler = WebSocketHandler(gemini_service, active_sessions, emotion_service)  # UPDATED
+    ws_handler = WebSocketHandler(gemini_service, active_sessions)  # UPDATED
 
     host = "localhost"
     port = 8765
