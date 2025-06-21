@@ -10,8 +10,9 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class AudioSessionManager:
-    def __init__(self):
+class AudioService:
+    def __init__(self,api_key,model="gemini-2.0-flash-live-001"):
+        self.client=genai.Client(api_key=api_key)
         self.audio_buffers = {}
         self.gemini_sessions = {}
         self.session_states = {}
@@ -50,9 +51,7 @@ Important guidelines:
 
 Remember: You're having a voice conversation, so keep responses natural and spoken-word friendly."""
 
-            # Configure the model for mental health support
-            client = genai.Client(api_key='AIzaSyA7305RGIlw82ON0bC994O_YHh4Kklc_aI')
-
+        
         # Configure for live audio interaction
             config = types.LiveConnectConfig(
             response_modalities=["AUDIO", "TEXT"],
@@ -67,7 +66,7 @@ Remember: You're having a voice conversation, so keep responses natural and spok
         )
             
             # Start live session
-            session_cm = client.aio.live.connect(model="gemini-2.0-flash-exp", config=config)
+            session_cm = self.client.aio.live.connect(model="gemini-2.0-flash-exp", config=config)
             session = await session_cm.__aenter__()
             self.gemini_sessions[client_id] = session
 

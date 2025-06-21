@@ -111,7 +111,8 @@ const AudioTest = () => {
 
   // Start recording
   const startRecording = useCallback(() => {
-    if (mediaRecorderRef.current && !isRecording && !isBotSpeaking) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state!="recording" 
+      && !isRecording && !isBotSpeaking) {
       setIsRecording(true);
       mediaRecorderRef.current.start(250); // Send chunks every 250ms
       

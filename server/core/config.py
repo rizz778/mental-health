@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 from pydantic import AnyHttpUrl, validator, Field
 import json
 from pathlib import Path
-
+import os
 class Settings(BaseSettings):
     APP_NAME: str = "FastAPI Backend"
     ENV: str = "development"
@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     #GPT
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: Optional[str] = None
-
+    
+    
     @validator("ALLOWED_ORIGINS", pre=True)
     def parse_allowed_origins(cls, v):
         if isinstance(v, str):

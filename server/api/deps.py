@@ -1,0 +1,32 @@
+from services.gemini_service import GeminiService
+from services.audio_service import AudioService
+from core.config import settings
+class DependencyStorage:
+
+    def __init__(self,api_key,gemini_model):
+
+        self.api_key=api_key
+        self.gemini_model=gemini_model
+
+        self._gemini_service=GeminiService(api_key=api_key,model=gemini_model)
+        self._audio_service=AudioService(api_key=api_key,model=gemini_model)
+
+
+    def get_gemini_service(self)->GeminiService:
+        return self._gemini_service
+    def get_audio_service(self)->AudioService:
+        return self._audio_service
+    
+async def initialize_dependencies():
+    global dependency_storage
+    dependency_storage=DependencyStorage(api_key=settings.GEMINI_API_KEY,gemini_model=settings.GEMINI_MODEL)
+
+def get_gemini_service()-> GeminiService:
+    if dependency_storage is None:
+        raise RuntimeError("Dependencies not initialized")
+    return dependency_storage.get_gemini_service()
+
+def get_audio_service()-> GeminiService:
+    if dependency_storage is None:
+        raise RuntimeError("Dependencies not initialized")
+    return dependency_storage.get_audio_service()
