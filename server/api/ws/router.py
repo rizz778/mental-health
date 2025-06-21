@@ -6,7 +6,6 @@ import numpy as np
 import cv2
 
 from services.gemini_service import GeminiService
-# from services.emotion_service import EmotionService
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +27,52 @@ def get_config_from_setup(setup_data, default_model):
         gemini_config["session_resumption"] = types.SessionResumptionConfig(handle=session_resumption.get("handle"))
     return model, gemini_config
 
+# --- Audio/recording manager for Gemini audio streaming ---
+class AudioSessionManager:
+    def __init__(self):
+        self.audio_buffers = {}
+        self.gemini_sessions = {}
+        self.session_states = {}
+
+    def init_client(self, client_id):
+        self.audio_buffers[client_id] = []
+        self.gemini_sessions[client_id] = None
+        self.session_states[client_id] = 'idle'
+
+    def cleanup_client(self, client_id):
+        self.audio_buffers.pop(client_id, None)
+        self.gemini_sessions.pop(client_id, None)
+        self.session_states.pop(client_id, None)
+
+    async def send_audio_chunk(self, client_id, audio_data):
+        if client_id in self.gemini_sessions and self.gemini_sessions[client_id]:
+            session = self.gemini_sessions[client_id]
+            await session.send(audio_data, mime_type="audio/webm")
+
+    async def start_recording(self, client_id):
+        self.session_states[client_id] = 'listening'
+        self.audio_buffers[client_id] = []
+
+    async def stop_recording(self, client_id):
+        if client_id in self.gemini_sessions and self.audio_buffers[client_id]:
+            self.session_states[client_id] = 'processing'
+            combined_audio = b''.join(self.audio_buffers[client_id])
+            if combined_audio:
+                session = self.gemini_sessions[client_id]
+                await session.send(combined_audio, mime_type="audio/webm")
+                self.audio_buffers[client_id] = []
+
+# --- WebSocketHandler update ---
 class WebSocketHandler:
-    def __init__(self, gemini_service: GeminiService, active_sessions: dict):
+    def __init__(self, gemini_service: GeminiService, active_sessions: dict, audio_manager: AudioSessionManager):
         self.gemini_service = gemini_service
         self.active_sessions = active_sessions
-        
+        self.audio_manager = audio_manager
 
     async def handle_client_connection(self, websocket, path="/"):
         client_id = f"client_{id(websocket)}"
         logger.info(f"Client {client_id} connected from path: {path}")
+        self.audio_manager.init_client(client_id)
         try:
             setup_msg = await websocket.recv()
             setup_data = json.loads(setup_msg)
@@ -51,6 +87,7 @@ class WebSocketHandler:
                     "config": gemini_config,
                     "session_handle": None
                 }
+                self.audio_manager.gemini_sessions[client_id] = session
                 await websocket.send(json.dumps({"setupComplete": {}}))
                 asyncio.create_task(
                     self.gemini_service.receive_responses(session, websocket, client_id, self.active_sessions)
@@ -63,6 +100,8 @@ class WebSocketHandler:
                 logger.info(f"[WebSocket] Received message: {msg}")
                 try:
                     data = json.loads(msg)
+
+                    message_type = data.get("type")
                 except json.JSONDecodeError:
                     await websocket.send(json.dumps({"error": "Invalid JSON"}))
                     continue
@@ -102,7 +141,27 @@ class WebSocketHandler:
                     except Exception as e:
                         logger.error(f"[Emotion] Error processing frame: {e}")
                         await websocket.send(json.dumps({"error": "Emotion processing failed"}))
-
+                elif message_type == "audio_chunk":
+                    # Decode base64 audio data
+                    audio_data = base64.b64decode(data.get("data", ""))
+                    if client_id in self.audio_manager.audio_buffers:
+                        self.audio_manager.audio_buffers[client_id].append(audio_data)
+                    # Send real-time audio chunk to Gemini
+                    await self.audio_manager.send_audio_chunk(client_id, audio_data)
+                
+                elif message_type == "start_recording":
+                    await self.audio_manager.start_recording(client_id)
+                
+                elif message_type == "stop_recording":
+                    await self.audio_manager.stop_recording(client_id)
+                
+                elif message_type == "text_message":
+                    # Handle text input (fallback)
+                    text_content = data.get("content", "")
+                    if text_content and client_id in self.audio_manager.gemini_sessions:
+                        session = self.audio_manager.gemini_sessions[client_id]
+                        await session.send(text_content)
+                
                 # 3. Other unsupported message types
                 else:
                     await websocket.send(json.dumps({"error": "Unsupported message format"}))
@@ -118,3 +177,4 @@ class WebSocketHandler:
                 except Exception as cleanup_error:
                     logger.error(f"Error cleaning up session for {client_id}: {cleanup_error}")
                 del self.active_sessions[client_id]
+            self.audio_manager.cleanup_client(client_id)

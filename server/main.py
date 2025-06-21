@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 async def main():
     
 
-    gemini_service = GeminiService('')
+    gemini_service = GeminiService('AIzaSyA7305RGIlw82ON0bC994O_YHh4Kklc_aI')
     # emotion_service = EmotionService()  # Instantiate EmotionService
     active_sessions = {}
     ws_handler = WebSocketHandler(gemini_service, active_sessions)  # UPDATED

@@ -4,13 +4,13 @@ import viteLogo from "/vite.svg";
 import "./App.css";
 import Test from "./components/Test";
 import EmotionTester from "./components/emo_test";
+import AudioTest from "./components/audio_test";
 function App() {
   const [count, setCount] = useState(0);
 
   return (
     <>
-      <Test/>
-      {/* <EmotionTester /> */}
+      <AudioTest/>
     </>
   );
 }

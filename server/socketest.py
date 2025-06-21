@@ -1,393 +1,358 @@
-"""
-WebSocket Backend Server - Live API Bridge
-This server acts as a bridge between frontend WebSocket clients and the Gemini Live API
-"""
-
 import asyncio
+import base64
 import json
 import logging
 import os
-from typing import Dict, Set
+from datetime import datetime
+from typing import Dict, Any, Optional
+import uuid
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import google.generativeai as genai
+from google.generativeai import types
 import websockets
-from websockets.server import WebSocketServerProtocol
-from google import genai
-from google.genai import types
+from pydantic import BaseModel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class LiveAPIBridge:
-    def __init__(self, api_key: str):
-        self.client = genai.Client(api_key=api_key)
-        self.model = "gemini-2.0-flash-live-001"
-        self.connected_clients: Set[WebSocketServerProtocol] = set()
-        self.active_sessions: Dict[str, any] = {}
-        
-    async def handle_client_connection(self, websocket: WebSocketServerProtocol, path: str = "/"):
-        """Handle new WebSocket client connections using Gemini Live API protocol"""
-        client_id = f"client_{id(websocket)}"
-        self.connected_clients.add(websocket)
-        logger.info(f"Client {client_id} connected from path: {path}")
-        try:
-            # Wait for setup message
-            setup_msg = await websocket.recv()
-            setup_data = json.loads(setup_msg)
-            if "setup" in setup_data:
-                # Parse model and config from setup
-                model = setup_data["setup"].get("model", self.model)
-                config = setup_data["setup"].get("generationConfig", {"responseModalities": ["TEXT"]})
-                system_instruction = setup_data["setup"].get("systemInstruction")
-                tools = setup_data["setup"].get("tools")
-                session_resumption = setup_data["setup"].get("sessionResumption")
-                # Prepare config for Gemini client
-                gemini_config = dict(config)
-                if system_instruction:
-                    gemini_config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
-                if tools:
-                    gemini_config["tools"] = tools
-                if session_resumption:
-                    gemini_config["session_resumption"] = types.SessionResumptionConfig(handle=session_resumption.get("handle"))
-                # Start Gemini session
-                session_cm = self.client.aio.live.connect(model=model, config=gemini_config)
-                session = await session_cm.__aenter__()
-                self.active_sessions[client_id] = {
-                    "session": session,
-                    "session_cm": session_cm,
-                    "websocket": websocket,
-                    "config": gemini_config,
-                    "session_handle": None  # Store session handle for resumption
-                }
-                await websocket.send(json.dumps({"setupComplete": {}}))
-                # Start listening for responses
-                asyncio.create_task(self.listen_to_live_api(client_id))
-            else:
-                await websocket.send(json.dumps({"error": "First message must be setup"}))
-                return
+# Initialize FastAPI app
+app = FastAPI(title="Mental Health Chatbot API", version="1.0.0")
 
-            # Main message loop
-            async for msg in websocket:
-                print(f"[Gemini] Received message from client: {msg}")
-                data = json.loads(msg)
-                if "clientContent" in data:
-                    user_turns = data["clientContent"].get("turns", [])
-                    print(f"[Gemini] Forwarding turns to Gemini: {user_turns}")
-                    # Log each turn's role and text for debugging
-                    for idx, turn in enumerate(user_turns):
-                        print(f"[Gemini] Turn {idx}: role={turn.get('role')}, text={[part.get('text') for part in turn.get('parts', [])]}")
-                    turn_complete = data["clientContent"].get("turnComplete", True)
-                    if user_turns and "parts" in user_turns[0] and user_turns[0]["parts"]:
-                        try:
-                            turns = [
-                                types.Content(
-                                    role=turn.get("role", "user"),
-                                    parts=[types.Part(**part) for part in turn.get("parts", [])]
-                                )
-                                for turn in user_turns
-                            ]
-                            print(f"[Gemini] Constructed Gemini turns: {[{'role': t.role, 'parts': [p.text for p in t.parts]} for t in turns]}")
-                            session = self.active_sessions[client_id]["session"]
-                            await session.send_client_content(turns=turns, turn_complete=turn_complete)
-                            print(f"[Gemini] Sent turns to Gemini: {turns}")
-                        except Exception as e:
-                            print(f"[Gemini] ERROR constructing or sending turns: {e}")
-                elif "realtimeInput" in data:
-                    # Handle audio/video/text streaming (not implemented)
-                    pass
-                elif "toolResponse" in data:
-                    # Handle tool/function call responses (not implemented)
-                    pass
-                # ... handle other message types as needed ...
-        except websockets.exceptions.ConnectionClosed:
-            logger.info(f"Client {client_id} disconnected")
-        except Exception as e:
-            logger.error(f"Error handling client {client_id}: {e}")
-        finally:
-            self.connected_clients.discard(websocket)
-            if client_id in self.active_sessions:
-                # Clean up session
-                try:
-                    session_data = self.active_sessions[client_id]
-                    session_cm = session_data["session_cm"]
-                    await session_cm.__aexit__(None, None, None)
-                except Exception as cleanup_error:
-                    logger.error(f"Error cleaning up session for {client_id}: {cleanup_error}")
-                del self.active_sessions[client_id]
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Configure Gemini
+
+
+class ConnectionManager:
+    """Manages WebSocket connections and Gemini Live API sessions"""
     
-    async def handle_client_message(self, websocket: WebSocketServerProtocol, client_id: str, message: str):
-        """Handle messages from WebSocket clients"""
-        try:
-            data = json.loads(message)
-            message_type = data.get("type")
-            
-            logger.info(f"Received message from {client_id}: {message_type}")
-            
-            if message_type == "start_session":
-                await self.start_live_session(websocket, client_id, data)
-            elif message_type == "send_message":
-                await self.send_to_live_api(websocket, client_id, data)
-            elif message_type == "end_session":
-                await self.end_live_session(client_id)
-            elif message_type == "configure_session":
-                await self.configure_session(websocket, client_id, data)
-            else:
-                await websocket.send(json.dumps({
-                    "type": "error",
-                    "message": f"Unknown message type: {message_type}"
-                }))
-                
-        except json.JSONDecodeError:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "message": "Invalid JSON format"
-            }))
-        except Exception as e:
-            logger.error(f"Error handling message from {client_id}: {e}")
-            await websocket.send(json.dumps({
-                "type": "error",
-                "message": str(e)
-            }))
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+        self.gemini_sessions: Dict[str, Any] = {}
+        self.audio_buffers: Dict[str, list] = {}
+        self.session_states: Dict[str, str] = {}  # 'listening', 'processing', 'speaking'
     
-    async def start_live_session(self, websocket: WebSocketServerProtocol, client_id: str, data: dict):
-        """Start a new Live API session"""
-        try:
-            # Configuration from client or default
-            config = data.get("config", {"response_modalities": ["TEXT"]})
-            
-            # Add system instructions if provided
-            if "system_instruction" in data:
-                config["system_instruction"] = types.Content(
-                    parts=[types.Part(text=data["system_instruction"])]
-                )
-            
-            # Add tools if specified
-            if data.get("enable_tools"):
-                config["tools"] = [
-                    {"code_execution": {}},
-                    {"google_search": {}}
-                ]
-            
-            logger.info(f"Starting Live API session for {client_id} with config: {config}")
-            
-            # Create Live API session using async context manager
-            session_cm = self.client.aio.live.connect(model=self.model, config=config)
-            session = await session_cm.__aenter__()
-            self.active_sessions[client_id] = {
-                "session": session,
-                "session_cm": session_cm,
-                "websocket": websocket,
-                "config": config
-            }
-            
-            # Start listening for responses
-            asyncio.create_task(self.listen_to_live_api(client_id))
-            
-            await websocket.send(json.dumps({
-                "type": "session_started",
-                "client_id": client_id,
-                "message": "Live API session started successfully"
-            }))
-            
-        except Exception as e:
-            logger.error(f"Error starting session for {client_id}: {e}")
-            await websocket.send(json.dumps({
-                "type": "error",
-                "message": f"Failed to start session: {str(e)}"
-            }))
-    
-    async def listen_to_live_api(self, client_id: str):
-        """Listen for responses from Live API and forward to client"""
-        if client_id not in self.active_sessions:
-            return
-            
-        session_data = self.active_sessions[client_id]
-        session = session_data["session"]
-        websocket = session_data["websocket"]
+    async def connect(self, websocket: WebSocket, client_id: str):
+        """Accept WebSocket connection and initialize Gemini session"""
+        await websocket.accept()
+        self.active_connections[client_id] = websocket
+        self.audio_buffers[client_id] = []
+        self.session_states[client_id] = 'idle'
         
-        try:
-            async for response in session.receive():
-                print(f"[Gemini] Raw response for {client_id}: {response}")
-                # Handle session resumption updates
-                if hasattr(response, "session_resumption_update") and response.session_resumption_update:
-                    print(f"[Gemini] SessionResumptionUpdate: {response.session_resumption_update}")
-                    handle = response.session_resumption_update.new_handle
-                    resumable = response.session_resumption_update.resumable
-                    self.active_sessions[client_id]["session_handle"] = handle
-                    await websocket.send(json.dumps({
-                        "type": "session_resumption_update",
-                        "handle": handle,
-                        "resumable": resumable
-                    }))
-                
-                # Handle text responses
-                if getattr(response, "text", None) is not None:
-                    print(f"[Gemini] Text chunk: {response.text}")
-                    await websocket.send(json.dumps({
-                        "type": "text_chunk",
-                        "content": response.text,
-                        "complete": False
-                    }))
-                
-                # Handle server content
-                if getattr(response, "server_content", None):
-                    print(f"[Gemini] Server content: {response.server_content}")
-                    if response.server_content.generation_complete:
-                        await websocket.send(json.dumps({
-                            "type": "generation_complete",
-                            "message": "Response generation completed"
-                        }))
-                    if response.server_content.interrupted:
-                        await websocket.send(json.dumps({
-                            "type": "interrupted",
-                            "message": "Generation was interrupted"
-                        }))
-                
-                # Handle tool calls
-                if hasattr(response, 'tool_call') and response.tool_call:
-                    await websocket.send(json.dumps({
-                        "type": "tool_call",
-                        "tool_call": str(response.tool_call)
-                    }))
-                
-                # Handle usage metadata
-                if getattr(response, "usage_metadata", None):
-                    usage = response.usage_metadata
-                    await websocket.send(json.dumps({
-                        "type": "usage_update",
-                        "total_tokens": usage.total_token_count,
-                        "details": [
-                            {
-                                "modality": getattr(detail, 'modality', 'unknown'),
-                                "token_count": getattr(detail, 'token_count', 0)
-                            }
-                            for detail in getattr(usage, 'response_tokens_details', [])
-                        ]
-                    }))
-                
-                # Handle session warnings
-                if hasattr(response, 'go_away') and response.go_away:
-                    print(f"[Gemini] go_away for {client_id}: time_left={getattr(response.go_away, 'time_left', None)}")
-                    await websocket.send(json.dumps({
-                        "type": "session_warning",
-                        "message": f"Session ending in: {getattr(response.go_away, 'time_left', None)}",
-                        "go_away": str(response.go_away)
-                    }))
-        except Exception as e:
-            print(f"[Gemini] Error listening to Live API for {client_id}: {e}")
-            if websocket.close_code is None:
-                await websocket.send(json.dumps({
-                    "type": "error",
-                    "message": f"Live API error: {str(e)}"
-                }))
-        finally:
-            # Print WebSocket close reason
-            if websocket.close_code is not None:
-                print(f"[Gemini] WebSocket closed for {client_id} with code {websocket.close_code} and reason: {getattr(websocket, 'close_reason', None)}")
-    
-    async def send_to_live_api(self, websocket: WebSocketServerProtocol, client_id: str, data: dict):
-        """Send message to Live API"""
-        if client_id not in self.active_sessions:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "message": "No active session. Start a session first."
-            }))
-            return
+        # Initialize Gemini Live session
+        await self._initialize_gemini_session(client_id)
         
-        try:
-            session = self.active_sessions[client_id]["session"]
-            message = data.get("message", "")
-            
-            logger.info(f"Sending message to Live API for {client_id}: {message[:50]}...")
-            
-            # Send to Live API
-            await session.send(
-                types.Content(
-                    role="user",
-                    parts=[types.Part(text=message)]
-                )
-            )
-            
-            await websocket.send(json.dumps({
-                "type": "message_sent",
-                "message": "Message sent to Live API"
-            }))
-            
-        except Exception as e:
-            logger.error(f"Error sending to Live API for {client_id}: {e}")
-            await websocket.send(json.dumps({
-                "type": "error",
-                "message": f"Failed to send message: {str(e)}"
-            }))
+        logger.info(f"Client {client_id} connected")
     
-    async def end_live_session(self, client_id: str):
-        """End Live API session"""
-        if client_id in self.active_sessions:
+    async def disconnect(self, client_id: str):
+        """Clean up connection and Gemini session"""
+        if client_id in self.active_connections:
+            del self.active_connections[client_id]
+        
+        if client_id in self.gemini_sessions:
             try:
-                session_data = self.active_sessions[client_id]
-                session_cm = session_data["session_cm"]
-                websocket = session_data["websocket"]
-                logger.info(f"Ending Live API session for {client_id}")
-                # Close the Live API session
-                await session_cm.__aexit__(None, None, None)
-                await websocket.send(json.dumps({
-                    "type": "session_ended",
-                    "client_id": client_id,
-                    "message": "Live API session ended successfully"
-                }))
+                await self.gemini_sessions[client_id].close()
+                del self.gemini_sessions[client_id]
             except Exception as e:
-                logger.error(f"Error ending session for {client_id}: {e}")
-                await websocket.send(json.dumps({
-                    "type": "error",
-                    "message": f"Failed to end session: {str(e)}"
-                }))
-            finally:
-                del self.active_sessions[client_id]
+                logger.error(f"Error closing Gemini session for {client_id}: {e}")
+        
+        if client_id in self.audio_buffers:
+            del self.audio_buffers[client_id]
+        
+        if client_id in self.session_states:
+            del self.session_states[client_id]
+        
+        logger.info(f"Client {client_id} disconnected")
     
-    async def configure_session(self, websocket: WebSocketServerProtocol, client_id: str, data: dict):
-        """Configure session parameters"""
-        # For this demo, we'll just acknowledge the configuration
-        # In a real implementation, you might restart the session with new config
-        await websocket.send(json.dumps({
-            "type": "configuration_updated",
-            "config": data.get("config", {}),
-            "message": "Configuration noted for next session"
-        }))
+    async def _initialize_gemini_session(self, client_id: str):
+        """Initialize Gemini Live API session"""
+        try:
+            # Mental health system prompt
+            system_prompt = """You are a compassionate mental health support chatbot. Your role is to:
 
-async def main():
-    """Main server function"""
-    # Get API key from environment variable or use the hardcoded one
-    api_key = os.getenv('GEMINI_API_KEY')
-    if not api_key:
-        logger.error("GEMINI_API_KEY environment variable not set")
-        return
+1. Provide empathetic, non-judgmental support to users discussing mental health concerns
+2. Listen actively and validate the user's feelings and experiences
+3. Offer coping strategies, mindfulness techniques, and general wellness advice
+4. Encourage professional help when appropriate, especially for crisis situations
+5. Maintain boundaries - you are a support tool, not a replacement for professional therapy
+6. Keep responses concise but warm, suitable for spoken conversation
+7. If someone expresses suicidal thoughts or immediate danger, encourage them to contact emergency services or crisis hotlines
+
+Important guidelines:
+- Always be compassionate and understanding
+- Avoid giving specific medical or psychiatric advice
+- Focus on emotional support and general wellness strategies
+- Keep responses conversational and natural for voice interaction
+- If you detect a crisis situation, prioritize safety resources
+
+Remember: You're having a voice conversation, so keep responses natural and spoken-word friendly."""
+
+            # Configure the model for mental health support
+            client = genai.Client(api_key='AIzaSyA7305RGIlw82ON0bC994O_YHh4Kklc_aI')
+
+        # Configure for live audio interaction
+            config = types.LiveConnectConfig(
+            response_modalities=["AUDIO", "TEXT"],
+            speech_config={
+                "voice_config": {
+                    "prebuilt_voice_config": {
+                        "voice_name": "Aoede"
+                    }
+                }
+            },
+            system_instruction=system_prompt
+        )
+            
+            # Start live session
+            session_cm = client.aio.live.connect(model="gemini-2.0-flash-exp", config=config)
+            session = await session_cm.__aenter__()
+            self.gemini_sessions[client_id] = session
+
+        # Start listening for responses from Gemini
+            asyncio.create_task(self._handle_gemini_responses(client_id, session))
+
+            logger.info(f"Gemini session initialized for client {client_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize Gemini session for {client_id}: {e}")
+            await self._send_error(client_id, f"Failed to initialize AI session: {str(e)}")
     
-    # Create bridge instance
-    bridge = LiveAPIBridge(api_key)
+    async def _handle_gemini_responses(self, client_id: str, live_session):
+        """Handle responses from Gemini Live API"""
+        try:
+            async for response in live_session.receive():
+                if client_id not in self.active_connections:
+                    break
+                
+                if response.server_content:
+                    if response.server_content.model_turn:
+                        # Handle text response
+                        for part in response.server_content.model_turn.parts:
+                            if hasattr(part, 'text') and part.text:
+                                await self._send_message(client_id, {
+                                    "type": "text_response",
+                                    "content": part.text,
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                    
+                    if response.server_content.turn_complete:
+                        # Turn is complete, ready for next user input
+                        self.session_states[client_id] = 'listening'
+                
+                # Handle audio data
+                if hasattr(response, 'audio_data') and response.audio_data:
+                    await self._send_message(client_id, {
+                        "type": "audio_response",
+                        "content": base64.b64encode(response.audio_data).decode('utf-8'),
+                        "timestamp": datetime.now().isoformat()
+                    })
+                
+        except Exception as e:
+            logger.error(f"Error handling Gemini responses for {client_id}: {e}")
+            await self._send_error(client_id, f"AI session error: {str(e)}")
     
-    # Start WebSocket server
-    host = "localhost"
-    port = 8765
+    async def send_audio_chunk(self, client_id: str, audio_data: bytes):
+        """Send audio chunk to Gemini"""
+        try:
+            if client_id in self.gemini_sessions:
+                live_session = self.gemini_sessions[client_id]
+                await live_session.send(audio_data, mime_type="audio/webm")
+                
+        except Exception as e:
+            logger.error(f"Error sending audio to Gemini for {client_id}: {e}")
+            await self._send_error(client_id, f"Error processing audio: {str(e)}")
     
-    logger.info(f"Starting WebSocket server on {host}:{port}")
+    async def start_recording(self, client_id: str):
+        """Signal start of user recording"""
+        self.session_states[client_id] = 'listening'
+        self.audio_buffers[client_id] = []
+        logger.info(f"Started recording for client {client_id}")
     
-    # Fix: Pass the method directly, websockets will handle the arguments
-    server = await websockets.serve(
-        bridge.handle_client_connection,
-        host,
-        port,
-        ping_interval=20,
-        ping_timeout=10
-    )
+    async def stop_recording(self, client_id: str):
+        """Signal end of user recording and process accumulated audio"""
+        try:
+            if client_id in self.gemini_sessions and self.audio_buffers[client_id]:
+                self.session_states[client_id] = 'processing'
+                
+                # Combine all audio chunks
+                combined_audio = b''.join(self.audio_buffers[client_id])
+                
+                if combined_audio:
+                    # Send the complete audio to Gemini
+                    live_session = self.gemini_sessions[client_id]
+                    await live_session.send(combined_audio, mime_type="audio/webm")
+                    
+                    # Clear the buffer
+                    self.audio_buffers[client_id] = []
+                    
+                    logger.info(f"Sent complete audio to Gemini for client {client_id}")
+                
+        except Exception as e:
+            logger.error(f"Error processing complete audio for {client_id}: {e}")
+            await self._send_error(client_id, f"Error processing your message: {str(e)}")
     
-    logger.info("WebSocket server started successfully")
-    logger.info("Waiting for client connections...")
-    await asyncio.Future()  # Keep server running
+    async def _send_message(self, client_id: str, message: dict):
+        """Send message to WebSocket client"""
+        if client_id in self.active_connections:
+            try:
+                await self.active_connections[client_id].send_text(json.dumps(message))
+            except Exception as e:
+                logger.error(f"Error sending message to {client_id}: {e}")
     
+    async def _send_error(self, client_id: str, error_message: str):
+        """Send error message to WebSocket client"""
+        await self._send_message(client_id, {
+            "type": "error",
+            "message": error_message,
+            "timestamp": datetime.now().isoformat()
+        })
+
+# Initialize connection manager
+manager = ConnectionManager()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """Main WebSocket endpoint for real-time communication"""
+    client_id = str(uuid.uuid4())
+    
+    try:
+        await manager.connect(websocket, client_id)
+        
+        # Send welcome message
+        await manager._send_message(client_id, {
+            "type": "system",
+            "message": "Connected to mental health support. I'm here to listen and help.",
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        while True:
+            try:
+                # Receive message from client
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                message_type = message.get("type")
+                
+                if message_type == "audio_chunk":
+                    # Decode base64 audio data
+                    audio_data = base64.b64decode(message.get("data", ""))
+                    
+                    # Buffer the audio chunk
+                    if client_id in manager.audio_buffers:
+                        manager.audio_buffers[client_id].append(audio_data)
+                    
+                    # Send real-time audio chunk to Gemini
+                    await manager.send_audio_chunk(client_id, audio_data)
+                
+                elif message_type == "start_recording":
+                    await manager.start_recording(client_id)
+                
+                elif message_type == "stop_recording":
+                    await manager.stop_recording(client_id)
+                
+                elif message_type == "text_message":
+                    # Handle text input (fallback)
+                    text_content = message.get("content", "")
+                    if text_content and client_id in manager.gemini_sessions:
+                        live_session = manager.gemini_sessions[client_id]
+                        await live_session.send(text_content)
+                
+                else:
+                    logger.warning(f"Unknown message type: {message_type}")
+                    
+            except json.JSONDecodeError:
+                logger.error(f"Invalid JSON received from client {client_id}")
+                await manager._send_error(client_id, "Invalid message format")
+                
+            except Exception as e:
+                logger.error(f"Error processing message from {client_id}: {e}")
+                await manager._send_error(client_id, "Error processing your message")
+                
+    except WebSocketDisconnect:
+        logger.info(f"Client {client_id} disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket error for client {client_id}: {e}")
+    finally:
+        await manager.disconnect(client_id)
+
+# Health check endpoints
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "active_connections": len(manager.active_connections)
+    }
+
+@app.get("/")
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "message": "Mental Health Chatbot API",
+        "version": "1.0.0",
+        "endpoints": {
+            "websocket": "/ws",
+            "health": "/health"
+        },
+        "features": [
+            "Real-time audio streaming",
+            "Google Gemini Live API integration",
+            "Mental health support conversations",
+            "Voice activity detection support"
+        ]
+    }
+
+# Crisis resources endpoint
+@app.get("/crisis-resources")
+async def get_crisis_resources():
+    """Get crisis support resources"""
+    return {
+        "emergency": {
+            "us": "988 (Suicide & Crisis Lifeline)",
+            "international": "Visit findahelpline.com"
+        },
+        "text_support": {
+            "crisis_text_line": "Text HOME to 741741",
+            "description": "Free, 24/7 crisis support via text"
+        },
+        "online_resources": [
+            {
+                "name": "National Suicide Prevention Lifeline",
+                "url": "https://suicidepreventionlifeline.org",
+                "description": "Free and confidential emotional support"
+            },
+            {
+                "name": "Crisis Text Line",
+                "url": "https://crisistextline.org",
+                "description": "Free crisis support via text message"
+            },
+            {
+                "name": "NAMI (National Alliance on Mental Illness)",
+                "url": "https://nami.org",
+                "description": "Mental health education, support and advocacy"
+            }
+        ],
+        "disclaimer": "This chatbot is a support tool, not a replacement for professional mental health care."
+    }
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Server shutting down...")
-    except Exception as e:
-        logger.error(f"Server error: {e}")
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+        log_level="info"
+    )
