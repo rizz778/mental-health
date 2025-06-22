@@ -83,36 +83,3 @@ app.include_router(ws_router)
 async def health_check():
     return {"status": "healthy"}
 
-# # WebSocket entrypoint
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
-
-
-    
-
-# gemini_service = GeminiService(settings.GEMINI_API_KEY,settings.GEMINI_MODEL)
-# audio_service=AudioService(settings.GEMINI_API_KEY,settings.GEMINI_MODEL)
-# # emotion_service = EmotionService()  # Instantiate EmotionService
-# active_sessions = {}
-# ws_handler = WebSocketHandler(gemini_service,audio_service,active_sessions)  # UPDATED
-
-# host = "localhost"
-# port = 8765
-# logger.info(f"Starting WebSocket server on {host}:{port}")
-
-# server = await websockets.serve(
-#         ws_handler.handle_client_connection,
-#         host,
-#         port,
-#         ping_interval=20,
-#         ping_timeout=10
-#     )
-
-# logger.info("WebSocket server started successfully")
-# logger.info("Waiting for client connections...")
-# await asyncio.Future()  # Keep server running
-
-app.include_router
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}

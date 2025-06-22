@@ -1,424 +1,867 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Activity, Brain, Heart } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react'; 
 
 const AudioTest = () => {
-  
+  // Connection state
   const [isConnected, setIsConnected] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isBotSpeaking, setIsBotSpeaking] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [volume, setVolume] = useState(0.8);
-  const [audioLevel, setAudioLevel] = useState(0);
+  const [hasActiveSession, setHasActiveSession] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   
-  const wsRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioStreamRef = useRef(null);
+  // UI state
+  const [toolsEnabled, setToolsEnabled] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  
+  // Audio state
+  const [isRecording, setIsRecording] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [pushToTalk, setPushToTalk] = useState(false);
+  const [vadThreshold, setVadThreshold] = useState(0.01);
+  // Add this state variable
+const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+
+
+  // Messages and input
+  const [messages, setMessages] = useState([
+    {
+      id: 1,
+      type: 'system',
+      content: 'Welcome to Live API Chat Demo! Connect to the WebSocket server and start a session to begin chatting.'
+    }
+  ]);
+  const [messageInput, setMessageInput] = useState('');
+  const [currentResponse, setCurrentResponse] = useState('');
+  const currentResponseRef = useRef('');
+  
+  // Config
+  const [systemInstruction, setSystemInstruction] = useState('');
+  const [wsUrl, setWsUrl] = useState('ws://localhost:8000');
+  
+  // Stats
+  const [totalTokens, setTotalTokens] = useState(0);
+  
+  // Status messages
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  
+  // Audio refs
+  const mediaStreamRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
-  const silenceTimerRef = useRef(null);
-  const audioQueueRef = useRef([]);
-  const isPlayingRef = useRef(false);
+  const processorRef = useRef(null);
+  const silenceTimeoutRef = useRef(null);
+  const audioBufferRef = useRef([]);
   
-  const SILENCE_THRESHOLD = 0.01;
-  const SILENCE_TIMEOUT = 1500; // 1.5 seconds
-  const WS_URL = 'ws://localhost:8000/ws'; 
+  // Refs
+  const wsRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const messageIdRef = useRef(2);
   
-  // Initialize audio context and analyzer
+  // Session resumption handle
+  const [sessionHandle, setSessionHandle] = useState(null);
+  const [resumeHandle, setResumeHandle] = useState(null);
+  const [shouldReconnect, setShouldReconnect] = useState(false);
+  
+  // Auto-scroll to bottom
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+  // Add this useEffect to monitor audio state
+useEffect(() => {
+  console.log('[Client] Audio State:', {
+    audioEnabled,
+    isSpeaking,
+    isRecording,
+    hasActiveSession,
+    pushToTalk,
+    bufferLength: audioBufferRef.current?.length || 0
+  });
+}, [audioEnabled, isSpeaking, isRecording, hasActiveSession, pushToTalk]);
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isTyping, currentResponse]);
+  
+  // Auto-hide status messages
+  useEffect(() => {
+    if (errorMessage) {
+      const timer = setTimeout(() => setErrorMessage(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [errorMessage]);
+  
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+  
+  useEffect(() => {
+    if (shouldReconnect && resumeHandle) {
+      setShouldReconnect(false);
+      setTimeout(() => {
+        console.log('[Client] Triggering session reconnect with resume handle:', resumeHandle);
+        connect(true);
+      }, 500);
+    }
+  }, [shouldReconnect, resumeHandle]);
+
+  // Voice Activity Detection
+  const analyzeAudio = useCallback((audioData) => {
+  // Calculate RMS (Root Mean Square) for better voice detection
+  const rms = Math.sqrt(audioData.reduce((acc, val) => acc + val * val, 0) / audioData.length);
+  
+  // Also check for consistent energy over multiple samples
+  const sum = audioData.reduce((acc, val) => acc + Math.abs(val), 0);
+  const average = sum / audioData.length;
+  
+  // Use both RMS and average with your threshold
+  const isVoice = rms > vadThreshold || average > vadThreshold * 0.5;
+  
+  if (isVoice) {
+    console.log('[Client] Voice detected - RMS:', rms.toFixed(4), 'Avg:', average.toFixed(4));
+  }
+  
+  return isVoice;
+}, [vadThreshold]);
+
+  // Audio processing
+  const processAudioData = useCallback((audioData) => {
+  if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !hasActiveSession) {
+    return;
+  }
+
+  const isCurrentlySpeaking = analyzeAudio(audioData);
+  
+  if (isCurrentlySpeaking) {
+    // Only buffer audio when speech is detected
+    if (!isSpeaking) {
+      console.log('[Client] Speech detected, starting to buffer audio');
+      setIsSpeaking(true);
+    }
+    audioBufferRef.current.push(...audioData);
+    
+    // Clear silence timeout
+    if (silenceTimeoutRef.current) {
+      clearTimeout(silenceTimeoutRef.current);
+      silenceTimeoutRef.current = null;
+    }
+  } else if (isSpeaking) {
+    // Start silence timeout only if we were speaking
+    if (!silenceTimeoutRef.current) {
+      silenceTimeoutRef.current = setTimeout(() => {
+        console.log('[Client] Silence detected, sending audio');
+        sendAudioToServer();
+        setIsSpeaking(false);
+        silenceTimeoutRef.current = null;
+      }, 800); // Reduced to 800ms for more responsive detection
+    }
+  }
+  // Don't buffer audio when not speaking - this was your main issue
+}, [analyzeAudio, hasActiveSession, isSpeaking]);
+
+  const sendAudioToServer = useCallback(() => {
+  if (audioBufferRef.current.length === 0) return;
+  
+  console.log('[Client] Sending audio buffer length:', audioBufferRef.current.length);
+  
+  // Convert float32 to int16
+  const int16Array = new Int16Array(audioBufferRef.current.length);
+  for (let i = 0; i < audioBufferRef.current.length; i++) {
+    int16Array[i] = Math.max(-32768, Math.min(32767, audioBufferRef.current[i] * 32768));
+  }
+  
+  // Convert to base64
+  const bytes = new Uint8Array(int16Array.buffer);
+  const base64Audio = btoa(String.fromCharCode.apply(null, bytes));
+  
+  const audioMessage = {
+    clientContent: {
+      turns: [{
+        role: 'user',
+        parts: [{
+          inlineData: {
+            mimeType: 'audio/pcm;rate=16000;channels=1', // Fixed format
+            data: base64Audio
+          }
+        }]
+      }],
+      turnComplete: true
+    }
+  };
+  
+  console.log('[Client] Sending audio message to Gemini');
+  wsRef.current.send(JSON.stringify(audioMessage));
+  
+  // Clear buffer
+  audioBufferRef.current = [];
+  setIsTyping(true);
+}, []);
+
+  // Initialize audio
   const initializeAudio = useCallback(async () => {
     try {
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
+          sampleRate: 16000,
+          channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: 16000
+          noiseSuppression: true
         }
       });
       
-      audioStreamRef.current = stream;
+      mediaStreamRef.current = stream;
       
-      // Set up audio analysis for voice activity detection
+      // Create audio context
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000
+      });
+      
       const source = audioContextRef.current.createMediaStreamSource(stream);
       analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 256;
-      source.connect(analyserRef.current);
+      analyserRef.current.fftSize = 2048;
       
-      // Set up MediaRecorder
-      mediaRecorderRef.current = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
+      // Create script processor for audio data
+      processorRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
       
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
-          // Convert blob to base64 and send
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64Audio = reader.result.split(',')[1];
-            wsRef.current.send(JSON.stringify({
-              type: 'audio_chunk',
-              data: base64Audio
-            }));
-          };
-          reader.readAsDataURL(event.data);
-        }
+      processorRef.current.onaudioprocess = (event) => {
+        if (!audioEnabled || (pushToTalk && !isRecording)) return;
+        
+        const inputData = event.inputBuffer.getChannelData(0);
+        const audioData = new Float32Array(inputData);
+        processAudioData(audioData);
       };
       
-      return true;
+      source.connect(analyserRef.current);
+      analyserRef.current.connect(processorRef.current);
+      processorRef.current.connect(audioContextRef.current.destination);
+      
+      showSuccess('Audio initialized successfully');
+      setAudioEnabled(true);
+      
     } catch (error) {
-      console.error('Error initializing audio:', error);
-      return false;
+      showError('Failed to initialize audio: ' + error.message);
+      console.error('[Client] Audio initialization error:', error);
+    }
+  }, [audioEnabled, processAudioData, pushToTalk, isRecording]);
+
+  // Cleanup audio
+  const cleanupAudio = useCallback(() => {
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    setAudioEnabled(false);
+    setIsRecording(false);
+    setIsSpeaking(false);
+  }, []);
+
+  // WebSocket message handler
+  const handleServerMessage = useCallback((data) => {
+    if (data.type === 'session_warning' && data.resume_handle) {
+      setResumeHandle(data.resume_handle);
+      setShouldReconnect(true);
+      addSystemMessage('Session expiring, reconnecting to resume...');
+    }
+    
+    // Handle serverContent from Gemini Live API
+    if (data.serverContent) {
+      const modelTurn = data.serverContent.modelTurn;
+      if (modelTurn && modelTurn.parts && modelTurn.parts.length > 0) {
+        const part = modelTurn.parts[0];
+        
+        // Handle text response
+        if (part.text) {
+          setCurrentResponse(prev => {
+            const updated = prev + part.text;
+            currentResponseRef.current = updated;
+            return updated;
+          });
+          setIsTyping(true);
+        }
+        
+        // Handle audio response (if supported)
+        if (part.inlineData && part.inlineData.mimeType.startsWith('audio/')) {
+          console.log('[Client] Received audio response');
+          playAudioResponse(part.inlineData.data);
+        }
+      }
+      
+      if (data.serverContent.generationComplete) {
+        if (currentResponseRef.current) {
+          addMessage('model', currentResponseRef.current);
+        }
+        setCurrentResponse('');
+        currentResponseRef.current = '';
+        setIsTyping(false);
+      }
+      
+      if (data.serverContent.turnComplete) {
+        console.log('[Client] Turn complete');
+      }
+      return;
+    }
+    
+    // Handle setupComplete to mark session as active
+    if (data.setupComplete !== undefined) {
+      setHasActiveSession(true);
+      addSystemMessage('Session setup complete - You can now send messages or speak');
+      return;
+    }
+    
+    // Handle other message types
+    switch (data.type) {
+      case 'connection_established':
+        showSuccess(data.message || 'Connected to Live API Bridge');
+        break;
+        
+      case 'session_started':
+        setHasActiveSession(true);
+        showSuccess('Session started successfully');
+        addSystemMessage('Session started - You can now send messages or speak');
+        break;
+        
+      case 'session_ended':
+        setHasActiveSession(false);
+        addSystemMessage('Session ended');
+        break;
+        
+      case 'text_chunk':
+        if (!data.complete) {
+          setIsTyping(true);
+          setCurrentResponse(prev => {
+            const updated = prev + data.content;
+            currentResponseRef.current = updated;
+            return updated;
+          });
+        }
+        break;
+        
+      case 'generation_complete':
+        setIsTyping(false);
+        if (currentResponseRef.current) {
+          addMessage('model', currentResponseRef.current);
+        }
+        setCurrentResponse('');
+        currentResponseRef.current = '';
+        break;
+        
+      case 'message_sent':
+        console.log('[Client] Message acknowledged by server');
+        break;
+        
+      case 'usage_update':
+        if (data.total_tokens) {
+          setTotalTokens(data.total_tokens);
+        }
+        break;
+        
+      case 'tool_call':
+        addSystemMessage(`Tool called: ${data.tool_call}`);
+        break;
+        
+      case 'interrupted':
+        setIsTyping(false);
+        setCurrentResponse('');
+        currentResponseRef.current = '';
+        addSystemMessage('Generation was interrupted');
+        break;
+        
+      case 'session_warning':
+        showError(data.message || 'Session warning');
+        break;
+        
+      case 'configuration_updated':
+        showSuccess(data.message || 'Configuration updated');
+        break;
+        
+      case 'error':
+        setIsTyping(false);
+        setCurrentResponse('');
+        currentResponseRef.current = '';
+        showError(data.message || 'An error occurred');
+        break;
+        
+      case 'session_resumption_update':
+        if (data.handle) {
+          setSessionHandle(data.handle);
+          addSystemMessage('Session can be resumed.');
+        }
+        break;
+        
+      default:
+        console.log('[Client] Unhandled message type:', data.type, data);
     }
   }, []);
   
-    // Voice Activity Detection
-  const detectVoiceActivity = useCallback(() => {
-    if (!analyserRef.current) return;
-    
-    const bufferLength = analyserRef.current.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    analyserRef.current.getByteFrequencyData(dataArray);
-    
-    // Calculate RMS (Root Mean Square) for audio level
-    let sum = 0;
-    for (let i = 0; i < bufferLength; i++) {
-      sum += (dataArray[i] / 255) ** 2;
-    }
-    const rms = Math.sqrt(sum / bufferLength);
-    setAudioLevel(rms);
-    
-    // Voice activity detection
-    if (rms > SILENCE_THRESHOLD) {
-      // Voice detected, clear silence timer
-      if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = null;
-      }
-      
-      // Start recording if not already recording
-      if (!isRecording && !isBotSpeaking) {
-        startRecording();
-      }
-    } else if (isRecording) {
-      // Silence detected while recording
-      if (!silenceTimerRef.current) {
-        silenceTimerRef.current = setTimeout(() => {
-          stopRecording();
-        }, SILENCE_TIMEOUT);
-      }
-    }
-  }, [isRecording, isBotSpeaking]);
-
-  // Start recording
-  const startRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state!="recording" 
-      && !isRecording && !isBotSpeaking) {
-      setIsRecording(true);
-      mediaRecorderRef.current.start(250); // Send chunks every 250ms
-      
-      // Send start recording signal
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'start_recording'
-        }));
-      }
-      
-      addMessage('user', 'Speaking...', 'audio');
-    }
-  }, [isRecording, isBotSpeaking]);
-
-  // Stop recording
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      setIsRecording(false);
-      mediaRecorderRef.current.stop();
-      
-      // Clear silence timer
-      if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = null;
-      }
-      
-      // Send stop recording signal
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'stop_recording'
-        }));
-      }
-    }
-  }, [isRecording]);
-
-    // Play audio from base64
-  const playAudio = useCallback(async (base64Audio) => {
-    try {
-      if (!audioContextRef.current) return;
-      
-      const audioData = atob(base64Audio);
-      const arrayBuffer = new ArrayBuffer(audioData.length);
-      const view = new Uint8Array(arrayBuffer);
-      
-      for (let i = 0; i < audioData.length; i++) {
-        view[i] = audioData.charCodeAt(i);
-      }
-      
-      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
-      const source = audioContextRef.current.createBufferSource();
-      const gainNode = audioContextRef.current.createGain();
-      
-      source.buffer = audioBuffer;
-      gainNode.gain.value = volume;
-      
-      source.connect(gainNode);
-      gainNode.connect(audioContextRef.current.destination);
-      
-      source.onended = () => {
-        setIsBotSpeaking(false);
-        isPlayingRef.current = false;
-        playNextAudio();
-      };
-      
-      setIsBotSpeaking(true);
-      isPlayingRef.current = true;
-      source.start();
-      
-    } catch (error) {
-      console.error('Error playing audio:', error);
-      setIsBotSpeaking(false);
-      isPlayingRef.current = false;
-    }
-  }, [volume]);
-   // Play next audio in queue
-  const playNextAudio = useCallback(() => {
-    if (audioQueueRef.current.length > 0 && !isPlayingRef.current) {
-      const nextAudio = audioQueueRef.current.shift();
-      playAudio(nextAudio);
-    }
-  }, [playAudio]);
-
-  // Add message to chat
-  const addMessage = useCallback((sender, content, type = 'text') => {
-    setMessages(prev => [...prev, {
-      id: Date.now(),
-      sender,
-      content,
+  // Helper functions
+  const addMessage = (type, content) => {
+    if (type !== 'user' && type !== 'model' && type !== 'system') return;
+    const newMessage = {
+      id: messageIdRef.current++,
       type,
-      timestamp: new Date().toLocaleTimeString()
-    }]);
-  }, []);
+      content,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, newMessage]);
+  };
+  
+  const addSystemMessage = (content) => {
+    addMessage('system', content);
+  };
+  
+  const showError = (message) => {
+    setErrorMessage(message);
+    console.error('[Client] Error:', message);
+  };
+  
+  const showSuccess = (message) => {
+    setSuccessMessage(message);
+  };
+  
+  const sendToServer = (message) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(message));
+    }
+  };
+  
+  // Build conversation turns for Gemini
+  const buildConversationTurns = (newUserMessage = null) => {
+    const conversationMessages = messages.filter(m => m.type === 'user' || m.type === 'model');
+    const turns = [];
+    conversationMessages.forEach(msg => {
+      if (msg.type === 'user') {
+        turns.push({ role: 'user', parts: [{ text: msg.content.trim() }] });
+      } else if (msg.type === 'model') {
+        turns.push({ role: 'model', parts: [{ text: msg.content.trim() }] });
+      }
+    });
+    if (newUserMessage) {
+      turns.push({ role: 'user', parts: [{ text: newUserMessage.trim() }] });
+    }
+    
+    let lastRole = null;
+    const filteredTurns = [];
+    for (const turn of turns) {
+      if (turn.role !== lastRole) {
+        filteredTurns.push(turn);
+        lastRole = turn.role;
+      }
+    }
 
-  // Connect to WebSocket
-  const connect = useCallback(async () => {
-    const audioInitialized = await initializeAudio();
-    if (!audioInitialized) {
-      alert('Failed to initialize audio. Please check your microphone permissions.');
+    return filteredTurns;
+  };
+  
+  // Connection handlers
+  const connect = async () => {
+    const url = wsUrl.trim();
+    if (!url) {
+      showError('Please enter a WebSocket URL');
       return;
     }
 
-    wsRef.current = new WebSocket(WS_URL);
-    
-    wsRef.current.onopen = () => {
-      setIsConnected(true);
-      addMessage('system', 'Connected! Start speaking when you\'re ready.');
-      
-      // Start voice activity detection
-      const vadInterval = setInterval(detectVoiceActivity, 100);
-      wsRef.current.vadInterval = vadInterval;
-    };
-    
-    wsRef.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      
-      switch (data.type) {
-        case 'text_response':
-          addMessage('bot', data.content, 'text');
-          break;
-          
-        case 'audio_response':
-          // Queue audio for playback
-          audioQueueRef.current.push(data.content);
-          if (!isPlayingRef.current) {
-            playNextAudio();
-          }
-          break;
-          
-        case 'transcription':
-          // Update the last user message with transcription
-          setMessages(prev => {
-            const newMessages = [...prev];
-            const lastUserMessage = newMessages.reverse().find(m => m.sender === 'user');
-            if (lastUserMessage) {
-              lastUserMessage.content = data.content;
-              lastUserMessage.type = 'text';
-            }
-            return newMessages.reverse();
-          });
-          break;
-          
-        case 'error':
-          console.error('WebSocket error:', data.message);
-          addMessage('system', `Error: ${data.message}`);
-          break;
-      }
-    };
-    
-    wsRef.current.onclose = () => {
-      setIsConnected(false);
-      setIsRecording(false);
-      setIsBotSpeaking(false);
-      
-      if (wsRef.current?.vadInterval) {
-        clearInterval(wsRef.current.vadInterval);
-      }
-      
-      addMessage('system', 'Disconnected from server.');
-    };
-    
-    wsRef.current.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      addMessage('system', 'Connection error occurred.');
-    };
-  }, [initializeAudio, detectVoiceActivity, playNextAudio, addMessage]);
+    try {
+      wsRef.current = new WebSocket(url);
 
-  // Disconnect from WebSocket
-  const disconnect = useCallback(() => {
+      wsRef.current.onopen = () => {
+        setIsConnected(true);
+        setConnectionStatus('Connected');
+        showSuccess('Connected to WebSocket server');
+        
+        // Send initial setup message with audio support
+       // In your connect function, replace the setupMsg:
+const setupMsg = {
+  setup: {
+    model: 'models/gemini-2.0-flash-exp',
+    generationConfig: {
+      responseModalities: audioEnabled ? ['TEXT', 'AUDIO'] : ['TEXT'],
+      speechConfig: audioEnabled ? {
+        voiceConfig: {
+          prebuiltVoiceConfig: {
+            voiceName: "Aoede"
+          }
+        }
+      } : undefined
+    },
+    systemInstruction: systemInstruction.trim() || undefined,
+    tools: toolsEnabled ? [
+      {
+        functionDeclarations: []
+      }
+    ] : undefined
+  }
+};
+        wsRef.current.send(JSON.stringify(setupMsg));
+        if (resumeHandle) {
+          console.log('[Client] Reconnected and sent setup with resume handle:', resumeHandle);
+        }
+        setResumeHandle(null);
+      };
+
+      wsRef.current.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleServerMessage(data);
+        } catch (error) {
+          console.error('[Client] Error parsing server message:', error);
+        }
+      };
+
+      wsRef.current.onclose = (event) => {
+        setIsConnected(false);
+        setHasActiveSession(false);
+        setConnectionStatus('Disconnected');
+        setIsTyping(false);
+        setCurrentResponse('');
+        currentResponseRef.current = '';
+        addSystemMessage(`Disconnected from server (Code: ${event.code})`);
+        if (resumeHandle) {
+          console.log('[Client] Disconnected, will attempt to reconnect with resume handle:', resumeHandle);
+          setTimeout(() => {
+            connect(true);
+          }, 500);
+        }
+      };
+
+      wsRef.current.onerror = (error) => {
+        showError('WebSocket connection error');
+        console.error('[Client] WebSocket error:', error);
+      };
+
+    } catch (error) {
+      showError('Failed to connect: ' + error.message);
+    }
+  };
+  
+  const disconnect = () => {
     if (wsRef.current) {
       wsRef.current.close();
+      wsRef.current = null;
+      console.log('[Client] Manually disconnected from WebSocket server');
+    }
+  };
+  
+  // Session handlers
+  const startSession = async () => {
+    if (!isConnected) {
+      showError('Not connected to server');
+      return;
     }
     
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach(track => track.stop());
+    const message = messageInput.trim();
+    if (!message) {
+      showError('Please enter a message to start the session.');
+      return;
     }
+    const turns = buildConversationTurns(message);
     
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-    }
-  }, []);
-
-    // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnect();
+    const payload = {
+      clientContent: {
+        turns: turns,
+        turnComplete: true
+      }
     };
-  }, [disconnect]);
+    
+    console.log('[Client] Starting session with payload:', payload);
+    sendToServer(payload);
+    
+    addMessage('user', message);
+    setMessageInput('');
+    setIsTyping(true);
+    setCurrentResponse('');
+    currentResponseRef.current = '';
+  };
+  
+  const endSession = async () => {
+    if (!hasActiveSession) return;
+    
+    sendToServer({
+      type: "end_session"
+    });
+    console.log('[Client] End session request sent');
+  };
+  
+  // Message handlers
+  const sendMessage = async () => {
+    const message = messageInput.trim();
+    if (!message || !hasActiveSession || isTyping) {
+      console.log('[Client] Cannot send message:', { message: !!message, hasActiveSession, isTyping });
+      return;
+    }
+    
+    const turns = buildConversationTurns(message);
+    const payload = {
+      clientContent: {
+        turns: turns,
+        turnComplete: true
+      }
+    };
+    
+    console.log('[Client] Sending message with payload:', payload);
+    sendToServer(payload);
+    
+    addMessage('user', message);
+    setMessageInput('');
+    setIsTyping(true);
+    setCurrentResponse('');
+    currentResponseRef.current = '';
+  };
+  
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (hasActiveSession) {
+        sendMessage();
+      } else {
+        startSession();
+      }
+    }
+  };
 
+  // Control handlers
+  const toggleTools = () => {
+    setToolsEnabled(!toolsEnabled);
+  };
+  
+  const toggleConfig = () => {
+    setShowConfig(!showConfig);
+  };
+  
+  const toggleAudio = () => {
+    if (audioEnabled) {
+      cleanupAudio();
+    } else {
+      initializeAudio();
+    }
+  };
+  
+  const togglePushToTalk = () => {
+    setPushToTalk(!pushToTalk);
+    
+  };
+  
+  const handlePushToTalkMouseDown = () => {
+    if (pushToTalk && audioEnabled && hasActiveSession) {
+      setIsRecording(true);
+    }
+  };
+  
+  const handlePushToTalkMouseUp = () => {
+    if (pushToTalk && isRecording) {
+      setIsRecording(false);
+      if (audioBufferRef.current.length > 0) {
+        sendAudioToServer();
+      }
+    }
+  };
+  // Also add these event handlers to prevent context menu and improve UX:
+const handlePushToTalkMouseLeave = () => {
+  if (pushToTalk && isRecording) {
+    console.log('[Client] Push-to-talk: Mouse left button, stopping recording');
+    setIsRecording(false);
+    if (audioBufferRef.current.length > 0) {
+      sendAudioToServer();
+    }
+  }
+};
+  const clearChat = () => {
+    setMessages([{
+      id: 1,
+      type: 'system',
+      content: 'Chat cleared. Welcome to Live API Chat Demo!'
+    }]);
+    messageIdRef.current = 2;
+    setTotalTokens(0);
+    setSessionHandle(null);
+    setCurrentResponse('');
+    currentResponseRef.current = '';
+    setIsTyping(false);
+    console.log('[Client] Chat cleared');
+  };
+  
+  const saveConfig = () => {
+    showSuccess('Configuration saved');
+    setShowConfig(false);
+    console.log('[Client] Configuration saved:', { systemInstruction, wsUrl, toolsEnabled, vadThreshold });
+  };
+  
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-2xl overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-blue-400 via-purple-500 to-purple-700 flex items-center justify-center p-5">
+      <div className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl w-full max-w-4xl h-[600px] flex flex-col overflow-hidden border border-white/20">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Brain className="w-8 h-8" />
-              <h1 className="text-2xl font-bold">Mental Health Support Bot</h1>
-            </div>
-            <div className={`px-4 py-2 rounded-full text-sm font-medium ${
-              isConnected 
-                ? 'bg-green-500 bg-opacity-30 border border-green-300' 
-                : 'bg-red-500 bg-opacity-30 border border-red-300'
-            }`}>
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </div>
+        <div className="bg-gradient-to-r from-blue-500 to-cyan-400 text-white p-5 text-center">
+          <h1 className="text-2xl font-bold mb-1">Live API Audio Chat Demo</h1>
+          <div className="flex items-center justify-center gap-2 text-sm opacity-90">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'} animate-pulse`}></div>
+            <span>{connectionStatus}</span>
+            {audioEnabled && (
+              <>
+                <div className={`w-2 h-2 rounded-full ${isSpeaking ? 'bg-red-400' : 'bg-gray-400'} animate-pulse`}></div>
+                <span>{isSpeaking ? 'Speaking' : 'Listening'}</span>
+              </>
+            )}
           </div>
         </div>
-
-        {/* Chat Area */}
-        <div className="h-96 overflow-y-auto p-6 bg-gray-50">
-          {messages.length === 0 ? (
-            <div className="text-center text-gray-600 mt-8">
-              <Heart className="w-12 h-12 mx-auto mb-4 text-pink-400" />
-              <p className="text-lg mb-2">Welcome to your mental health support space</p>
-              <p className="text-sm">Connect and start speaking when you're ready. I'm here to listen.</p>
-              <p className="text-xs mt-4 text-gray-500">⚠️ This is a support tool, not a replacement for professional care</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                      message.sender === 'user'
-                        ? 'bg-blue-500 text-white'
-                        : message.sender === 'bot'
-                        ? 'bg-green-100 text-gray-800'
-                        : 'bg-gray-200 text-gray-600'
-                    }`}
-                  >
-                    <p className="text-sm">{message.content}</p>
-                    <p className="text-xs opacity-70 mt-1">{message.timestamp}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
+        
         {/* Controls */}
-        <div className="p-6 bg-white border-t">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex space-x-3">
-              <button
-                onClick={connect}
-                disabled={isConnected}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg disabled:bg-gray-400 hover:bg-blue-700 transition-colors"
-              >
-                Connect
-              </button>
-              <button
-                onClick={disconnect}
-                disabled={!isConnected}
-                className="px-6 py-2 bg-red-600 text-white rounded-lg disabled:bg-gray-400 hover:bg-red-700 transition-colors"
-              >
-                Disconnect
-              </button>
-            </div>
-
-            {/* Status Indicators */}
-            <div className="flex items-center space-x-4">
-              <div className={`flex items-center space-x-2 ${isRecording ? 'text-red-600' : 'text-gray-400'}`}>
-                {isRecording ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-                <span className="text-sm">Listening</span>
-              </div>
-              
-              <div className={`flex items-center space-x-2 ${isBotSpeaking ? 'text-green-600' : 'text-gray-400'}`}>
-                {isBotSpeaking ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-                <span className="text-sm">Speaking</span>
-              </div>
-              
-              {/* Audio Level Indicator */}
-              <div className="flex items-center space-x-2">
-                <Activity className="w-5 h-5 text-blue-600" />
-                <div className="w-20 bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-100"
-                    style={{ width: `${Math.min(audioLevel * 100, 100)}%` }}
-                  />
-                </div>
-              </div>
-            </div>
+        <div className="p-4 bg-black/5 border-b border-black/10 flex flex-wrap gap-3 items-center">
+          <div className="flex gap-2">
+            <button
+              onClick={connect}
+              disabled={isConnected}
+              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              Connect
+            </button>
+            <button
+              onClick={disconnect}
+              disabled={!isConnected}
+              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              Disconnect
+            </button>
           </div>
-
-          {/* Volume Control */}
-          <div className="flex items-center space-x-3">
-            <VolumeX className="w-4 h-4 text-gray-600" />
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.1"
-              value={volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
-              className="flex-1"
-            />
-            <Volume2 className="w-4 h-4 text-gray-600" />
-            <span className="text-sm text-gray-600 w-12">{Math.round(volume * 100)}%</span>
+          
+          <div className="flex gap-2">
+            <button
+              onClick={startSession}
+              disabled={!isConnected || hasActiveSession}
+              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              Start Session
+            </button>
+            <button
+              onClick={endSession}
+              disabled={!hasActiveSession}
+              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              End Session
+            </button>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-gray-600">Audio:</label>
+            <button
+              onClick={toggleAudio}
+              className={`relative w-10 h-5 rounded-full transition-colors ${audioEnabled ? 'bg-green-500' : 'bg-gray-300'}`}
+            >
+              <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${audioEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+            </button>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-gray-600">Push-to-Talk:</label>
+            <button
+              onClick={togglePushToTalk}
+              className={`relative w-10 h-5 rounded-full transition-colors ${pushToTalk ? 'bg-blue-500' : 'bg-gray-300'}`}
+            >
+              <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${pushToTalk ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+            </button>
+          </div>
+          
+          {pushToTalk && (
+            <button
+              onMouseDown={handlePushToTalkMouseDown}
+              onMouseUp={handlePushToTalkMouseUp}
+              onMouseLeave={handlePushToTalkMouseLeave}
+              onContextMenu={(e) => e.preventDefault()}
+              disabled={!audioEnabled || !hasActiveSession}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                isRecording 
+                  ? 'bg-red-500 text-white' 
+                  : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
+              }`}
+            >
+              {isRecording ? '🔴 Recording' : '🎤 Hold to Speak'}
+            </button>
+          )}
+          
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-gray-600">Tools:</label>
+            <button
+              onClick={toggleTools}
+              className={`relative w-10 h-5 rounded-full transition-colors ${toolsEnabled ? 'bg-blue-500' : 'bg-gray-300'}`}
+            >
+              <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${toolsEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+            </button>
+          </div>
+          
+          <div className="flex gap-2">
+            <button
+              onClick={toggleConfig}
+              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
+            >
+              Config
+            </button>
+            <button
+              onClick={clearChat}
+              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
+            >
+              Clear
+            </button>
           </div>
         </div>
-      </div>
-    </div>
-  )
+        
+        {/* Config Panel */}
+        {showConfig && (
+          <div className="p-4 bg-black/5 border-b border-black/10 animate-in slide-in-from-top duration-300">
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">System Instruction:</label>
+                <textarea
+                  value={systemInstruction}
+                  onChange={(e) => setSystemInstruction(e.target.value)}
+                  placeholder="You are a helpful assistant..."
+                  className="w-full p-2 border border-gray-300 rounded-lg text-xs resize-none h-16"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">WebSocket URL:</label>
+                <input
+                  type="text"
+                  value={wsUrl}
+                  onChange={(e) => setWsUrl(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">VAD Threshold:</label>
+                <input
+                  type="range"
+                  min="0.001"
+                  max="0.1"
+                  step="0.001"
+                  value={vadThreshold}
+                  onChange={(e) => setVadThreshold(parseFloat(e.target.value))}
+                  className="w-full"
+                />
+                <span className="text-xs text-gray-500">{vadThreshold.toFixed(3)}</span>
+              </div>
+              <button
+                onClick={saveConfig}
+                className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
+              >
+                Save Config
+              </button>
+            </div>
+          </div>
+        )}
+ </div>
+ </div>
+  )       
 }
+
 
 export default AudioTest;
