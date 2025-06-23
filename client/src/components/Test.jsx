@@ -25,7 +25,7 @@ const Test = () => {
   
   // Config
   const [systemInstruction, setSystemInstruction] = useState('');
-  const [wsUrl, setWsUrl] = useState('ws://localhost:8765');
+  const [wsUrl, setWsUrl] = useState('ws://localhost:8000');
   
   // Stats
   const [totalTokens, setTotalTokens] = useState(0);
