@@ -1,3 +1,7 @@
 venv/
 .env
+main1.py
+temp.py
+services/audio_service.py
+api/ws/audio_router.py
 __pycache__/
