@@ -17,9 +17,11 @@ const AudioTest = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [pushToTalk, setPushToTalk] = useState(false);
   const [vadThreshold, setVadThreshold] = useState(0.01);
+
+
   // Add this state variable
 const [isProcessingAudio, setIsProcessingAudio] = useState(false);
-
+   const [isManualRecording, setIsManualRecording] = useState(false);
 
   // Messages and input
   const [messages, setMessages] = useState([
@@ -52,6 +54,10 @@ const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const silenceTimeoutRef = useRef(null);
   const audioBufferRef = useRef([]);
   
+const [audioChunks, setAudioChunks] = useState([]);
+const mediaRecorderRef = useRef(null);
+const streamRef = useRef(null);
+
   // Refs
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -61,7 +67,7 @@ const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [sessionHandle, setSessionHandle] = useState(null);
   const [resumeHandle, setResumeHandle] = useState(null);
   const [shouldReconnect, setShouldReconnect] = useState(false);
-  
+  const [isPlayingResponse,setIsPlayingResponse]=useState(false)
   // Auto-scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -77,7 +83,7 @@ useEffect(() => {
     bufferLength: audioBufferRef.current?.length || 0
   });
 }, [audioEnabled, isSpeaking, isRecording, hasActiveSession, pushToTalk]);
-  useEffect(() => {
+useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping, currentResponse]);
   
@@ -105,7 +111,27 @@ useEffect(() => {
       }, 500);
     }
   }, [shouldReconnect, resumeHandle]);
-
+// Add this useEffect to monitor audio buffer during manual recording:
+useEffect(() => {
+  let intervalId;
+  
+  if (isManualRecording) {
+    intervalId = setInterval(() => {
+      console.log('[Client] Manual recording buffer status:', {
+        bufferLength: audioBufferRef.current?.length || 0,
+        audioEnabled,
+        hasActiveSession,
+        mediaStreamActive: mediaStreamRef.current?.active || false
+      });
+    }, 1000); // Log every second during recording
+  }
+  
+  return () => {
+    if (intervalId) {
+      clearInterval(intervalId);
+    }
+  };
+}, [isManualRecording, audioEnabled, hasActiveSession]);
   // Voice Activity Detection
   const analyzeAudio = useCallback((audioData) => {
   // Calculate RMS (Root Mean Square) for better voice detection
@@ -125,12 +151,80 @@ useEffect(() => {
   return isVoice;
 }, [vadThreshold]);
 
+// Manual start recording function
+// Replace your startRecording function with this:
+// Replace your startRecording function with this simpler version:
+const startRecording = async () => {
+  try {
+    console.log('[Client] Starting manual recording');
+    
+    // Clear any existing buffer
+    audioBufferRef.current = [];
+    
+    // If audio is not enabled, initialize it first
+    if (!audioEnabled) {
+      await initializeAudio();
+    }
+    
+    setIsManualRecording(true);
+    console.log('[Client] Manual recording started - audio will be buffered');
+    
+  } catch (error) {
+    console.error('Error starting recording:', error);
+    showError('Failed to start recording: ' + error.message);
+  }
+};
+// Manual stop recording function
+// Replace your stopRecording function with this:
+const stopRecording = () => {
+  if (!isManualRecording) {
+    console.log('[Client] Not in manual recording mode');
+    return;
+  }
+  
+  console.log('[Client] Stopping manual recording');
+  console.log('[Client] Audio buffer length:', audioBufferRef.current.length);
+  
+  setIsManualRecording(false);
+  setIsProcessingAudio(true);
+  
+  if (audioBufferRef.current.length > 0) {
+    console.log('[Client] Sending audio chunks to server - buffer size:', audioBufferRef.current.length);
+    sendAudioToServer();
+  } else {
+    console.log('[Client] No audio recorded - buffer is empty');
+    showError('No audio recorded');
+    setIsProcessingAudio(false);
+  }
+};
+
+
   // Audio processing
-  const processAudioData = useCallback((audioData) => {
+  // Replace your processAudioData function with this:
+// Replace your processAudioData function with this complete version:
+const processAudioData = useCallback((audioData) => {
   if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !hasActiveSession) {
     return;
   }
-
+  
+  // For manual recording, always buffer the audio
+  if (isManualRecording) {
+    audioBufferRef.current.push(...audioData);
+    console.log('[Client] Manual recording: buffered', audioData.length, 'samples. Total:', audioBufferRef.current.length);
+    return;
+  }
+  
+  // For push-to-talk mode, only process when recording
+  if (pushToTalk && !isRecording) {
+    return;
+  }
+  
+  // For regular audio mode, only process when audio is enabled
+  if (!audioEnabled) {
+    return;
+  }
+  
+  // For automatic VAD detection
   const isCurrentlySpeaking = analyzeAudio(audioData);
   
   if (isCurrentlySpeaking) {
@@ -154,11 +248,10 @@ useEffect(() => {
         sendAudioToServer();
         setIsSpeaking(false);
         silenceTimeoutRef.current = null;
-      }, 800); // Reduced to 800ms for more responsive detection
+      }, 800);
     }
   }
-  // Don't buffer audio when not speaking - this was your main issue
-}, [analyzeAudio, hasActiveSession, isSpeaking]);
+}, [analyzeAudio, hasActiveSession, isSpeaking, isManualRecording, pushToTalk, isRecording, audioEnabled]);
 
   const sendAudioToServer = useCallback(() => {
   if (audioBufferRef.current.length === 0) return;
@@ -199,52 +292,52 @@ useEffect(() => {
 }, []);
 
   // Initialize audio
-  const initializeAudio = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: 16000,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true
-        }
-      });
+  // Replace your initializeAudio function with this:
+const initializeAudio = useCallback(async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        sampleRate: 16000,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true
+      }
+    });
+    
+    mediaStreamRef.current = stream;
+    
+    // Create audio context
+    audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 16000
+    });
+    
+    const source = audioContextRef.current.createMediaStreamSource(stream);
+    analyserRef.current = audioContextRef.current.createAnalyser();
+    analyserRef.current.fftSize = 2048;
+    
+    // Create script processor for audio data
+    processorRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
+    
+    processorRef.current.onaudioprocess = (event) => {
+      const inputData = event.inputBuffer.getChannelData(0);
+      const audioData = new Float32Array(inputData);
       
-      mediaStreamRef.current = stream;
-      
-      // Create audio context
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000
-      });
-      
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 2048;
-      
-      // Create script processor for audio data
-      processorRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
-      
-      processorRef.current.onaudioprocess = (event) => {
-        if (!audioEnabled || (pushToTalk && !isRecording)) return;
-        
-        const inputData = event.inputBuffer.getChannelData(0);
-        const audioData = new Float32Array(inputData);
-        processAudioData(audioData);
-      };
-      
-      source.connect(analyserRef.current);
-      analyserRef.current.connect(processorRef.current);
-      processorRef.current.connect(audioContextRef.current.destination);
-      
-      showSuccess('Audio initialized successfully');
-      setAudioEnabled(true);
-      
-    } catch (error) {
-      showError('Failed to initialize audio: ' + error.message);
-      console.error('[Client] Audio initialization error:', error);
-    }
-  }, [audioEnabled, processAudioData, pushToTalk, isRecording]);
-
+      // Always process audio data - let processAudioData handle the logic
+      processAudioData(audioData);
+    };
+    
+    source.connect(analyserRef.current);
+    analyserRef.current.connect(processorRef.current);
+    processorRef.current.connect(audioContextRef.current.destination);
+    
+    showSuccess('Audio initialized successfully');
+    setAudioEnabled(true);
+    
+  } catch (error) {
+    showError('Failed to initialize audio: ' + error.message);
+    console.error('[Client] Audio initialization error:', error);
+  }
+}, [processAudioData]);
   // Cleanup audio
   const cleanupAudio = useCallback(() => {
     if (processorRef.current) {
@@ -267,7 +360,47 @@ useEffect(() => {
     setIsRecording(false);
     setIsSpeaking(false);
   }, []);
-
+  const playAudioResponse = useCallback(async (base64Audio) => {
+  try {
+    setIsPlayingResponse(true);
+    
+    // Decode base64 to binary
+    const binaryString = atob(base64Audio);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    // Create audio context if not exists or if closed
+    if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    // Resume context if suspended
+    if (audioContextRef.current.state === 'suspended') {
+      await audioContextRef.current.resume();
+    }
+    
+    // Decode and play audio
+    const audioBuffer = await audioContextRef.current.decodeAudioData(bytes.buffer);
+    const source = audioContextRef.current.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContextRef.current.destination);
+    
+    source.onended = () => {
+      setIsPlayingResponse(false);
+      console.log('[Client] Audio response playback finished');
+    };
+    
+    source.start();
+    console.log('[Client] Playing audio response');
+    
+  } catch (error) {
+    console.error('[Client] Error playing audio response:', error);
+    setIsPlayingResponse(false);
+    showError('Failed to play audio response: ' + error.message);
+  }
+}, []);
   // WebSocket message handler
   const handleServerMessage = useCallback((data) => {
     if (data.type === 'session_warning' && data.resume_handle) {
@@ -300,8 +433,9 @@ useEffect(() => {
       }
       
       if (data.serverContent.generationComplete) {
-        if (currentResponseRef.current) {
-          addMessage('model', currentResponseRef.current);
+        setIsProcessingAudio(false);
+        if(currentResponseRef.current){
+          addMessage('model',currentResponseRef.current);
         }
         setCurrentResponse('');
         currentResponseRef.current = '';
@@ -327,6 +461,12 @@ useEffect(() => {
         showSuccess(data.message || 'Connected to Live API Bridge');
         break;
         
+      case 'audio_response':
+        if (data.audio_data) {
+          console.log('[Client] Received audio response from server');
+          playAudioResponse(data.content);
+  }
+  break;  
       case 'session_started':
         setHasActiveSession(true);
         showSuccess('Session started successfully');
@@ -484,16 +624,16 @@ useEffect(() => {
        // In your connect function, replace the setupMsg:
 const setupMsg = {
   setup: {
-    model: 'models/gemini-2.0-flash-exp',
+    model: 'gemini-2.0-flash-live-001',
     generationConfig: {
-      responseModalities: audioEnabled ? ['TEXT', 'AUDIO'] : ['TEXT'],
-      speechConfig: audioEnabled ? {
+      responseModalities: ['AUDIO'],
+      speechConfig:  {
         voiceConfig: {
           prebuiltVoiceConfig: {
             voiceName: "Aoede"
           }
         }
-      } : undefined
+      }
     },
     systemInstruction: systemInstruction.trim() || undefined,
     tools: toolsEnabled ? [
@@ -697,170 +837,223 @@ const handlePushToTalkMouseLeave = () => {
     console.log('[Client] Configuration saved:', { systemInstruction, wsUrl, toolsEnabled, vadThreshold });
   };
   
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-400 via-purple-500 to-purple-700 flex items-center justify-center p-5">
-      <div className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl w-full max-w-4xl h-[600px] flex flex-col overflow-hidden border border-white/20">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-blue-500 to-cyan-400 text-white p-5 text-center">
-          <h1 className="text-2xl font-bold mb-1">Live API Audio Chat Demo</h1>
-          <div className="flex items-center justify-center gap-2 text-sm opacity-90">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'} animate-pulse`}></div>
-            <span>{connectionStatus}</span>
-            {audioEnabled && (
-              <>
-                <div className={`w-2 h-2 rounded-full ${isSpeaking ? 'bg-red-400' : 'bg-gray-400'} animate-pulse`}></div>
-                <span>{isSpeaking ? 'Speaking' : 'Listening'}</span>
-              </>
-            )}
-          </div>
+return (
+  <div className="min-h-screen bg-gradient-to-br from-blue-400 via-purple-500 to-purple-700 flex items-center justify-center p-5">
+    <div className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl w-full max-w-4xl h-[600px] flex flex-col overflow-hidden border border-white/20">
+      
+      {/* Header */}
+      <div className="bg-gradient-to-r from-blue-500 to-cyan-400 text-white p-5 text-center">
+        <h1 className="text-2xl font-bold mb-1">Live API Audio Chat Demo</h1>
+        <div className="flex items-center justify-center gap-2 text-sm opacity-90">
+          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'} animate-pulse`}></div>
+          <span>{connectionStatus}</span>
+          {audioEnabled && (
+            <>
+              <div className={`w-2 h-2 rounded-full ${isSpeaking ? 'bg-red-400' : 'bg-gray-400'} animate-pulse`}></div>
+              <span>{isSpeaking ? 'Speaking' : 'Listening'}</span>
+            </>
+          )}
+        </div>
+      </div>
+      
+      {/* Controls Section */}
+      <div className="p-4 bg-black/5 border-b border-black/10 flex flex-wrap gap-3 items-center">
+        
+        {/* Connection Controls */}
+        <div className="flex gap-2">
+          <button
+            onClick={connect}
+            disabled={isConnected}
+            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+          >
+            Connect
+          </button>
+          <button
+            onClick={disconnect}
+            disabled={!isConnected}
+            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+          >
+            Disconnect
+          </button>
         </div>
         
-        {/* Controls */}
-        <div className="p-4 bg-black/5 border-b border-black/10 flex flex-wrap gap-3 items-center">
+        {/* Session Controls */}
+        <div className="flex gap-2">
+          <button
+            onClick={startSession}
+            disabled={!isConnected || hasActiveSession}
+            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+          >
+            Start Session
+          </button>
+          <button
+            onClick={endSession}
+            disabled={!hasActiveSession}
+            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+          >
+            End Session
+          </button>
+        </div>
+        
+        {/* Manual Recording Controls */}
+        <div className="flex gap-2">
+          <button
+            onClick={startRecording}
+            disabled={!audioEnabled || !hasActiveSession || isManualRecording}
+            className="bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            🎤 Start Recording
+          </button>
+          <button
+            onClick={stopRecording}
+            disabled={!isManualRecording}
+            className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            ⏹️ Stop & Send
+          </button>
+        </div>
+        
+        {/* Audio Controls */}
+        <div className="flex gap-2">
+          <button
+            onClick={toggleAudio}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              audioEnabled 
+                ? 'bg-green-500 text-white hover:bg-green-600' 
+                : 'bg-gray-500 text-white hover:bg-gray-600'
+            }`}
+          >
+            {audioEnabled ? '🎤 Audio On' : '🎤 Audio Off'}
+          </button>
+          
+          <button
+            onClick={togglePushToTalk}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              pushToTalk 
+                ? 'bg-blue-500 text-white hover:bg-blue-600' 
+                : 'bg-gray-500 text-white hover:bg-gray-600'
+            }`}
+          >
+            {pushToTalk ? 'Push-to-Talk On' : 'Push-to-Talk Off'}
+          </button>
+        </div>
+        
+        {/* Push-to-Talk Control (conditional) */}
+        {pushToTalk && audioEnabled && hasActiveSession && (
           <div className="flex gap-2">
-            <button
-              onClick={connect}
-              disabled={isConnected}
-              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-            >
-              Connect
-            </button>
-            <button
-              onClick={disconnect}
-              disabled={!isConnected}
-              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-            >
-              Disconnect
-            </button>
-          </div>
-          
-          <div className="flex gap-2">
-            <button
-              onClick={startSession}
-              disabled={!isConnected || hasActiveSession}
-              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-            >
-              Start Session
-            </button>
-            <button
-              onClick={endSession}
-              disabled={!hasActiveSession}
-              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-            >
-              End Session
-            </button>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-gray-600">Audio:</label>
-            <button
-              onClick={toggleAudio}
-              className={`relative w-10 h-5 rounded-full transition-colors ${audioEnabled ? 'bg-green-500' : 'bg-gray-300'}`}
-            >
-              <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${audioEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
-            </button>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-gray-600">Push-to-Talk:</label>
-            <button
-              onClick={togglePushToTalk}
-              className={`relative w-10 h-5 rounded-full transition-colors ${pushToTalk ? 'bg-blue-500' : 'bg-gray-300'}`}
-            >
-              <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${pushToTalk ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
-            </button>
-          </div>
-          
-          {pushToTalk && (
             <button
               onMouseDown={handlePushToTalkMouseDown}
               onMouseUp={handlePushToTalkMouseUp}
               onMouseLeave={handlePushToTalkMouseLeave}
               onContextMenu={(e) => e.preventDefault()}
-              disabled={!audioEnabled || !hasActiveSession}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              className={`px-6 py-3 rounded-lg text-sm font-semibold transition-all select-none ${
                 isRecording 
-                  ? 'bg-red-500 text-white' 
-                  : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
+                  ? 'bg-red-500 text-white shadow-lg' 
+                  : 'bg-blue-500 text-white hover:bg-blue-600'
               }`}
             >
-              {isRecording ? '🔴 Recording' : '🎤 Hold to Speak'}
-            </button>
-          )}
-          
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-gray-600">Tools:</label>
-            <button
-              onClick={toggleTools}
-              className={`relative w-10 h-5 rounded-full transition-colors ${toolsEnabled ? 'bg-blue-500' : 'bg-gray-300'}`}
-            >
-              <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${toolsEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+              {isRecording ? '🔴 Recording...' : '🎤 Hold to Talk'}
             </button>
           </div>
-          
-          <div className="flex gap-2">
+        )}
+        
+        {/* Status Indicators */}
+        {isManualRecording && (
+          <div className="flex items-center gap-2 text-red-600">
+            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+            <span className="text-sm font-semibold">Recording...</span>
+          </div>
+        )}
+        
+        {isProcessingAudio && (
+          <div className="flex items-center gap-2 text-blue-600">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+            <span className="text-sm font-semibold">Processing...</span>
+          </div>
+        )}
+        
+        {isPlayingResponse && (
+          <div className="flex items-center gap-2 text-green-600">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span className="text-sm font-semibold">Playing Response...</span>
+          </div>
+        )}
+        
+        {/* Tools Toggle */}
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-semibold text-gray-600">Tools:</label>
+          <button
+            onClick={toggleTools}
+            className={`relative w-10 h-5 rounded-full transition-colors ${toolsEnabled ? 'bg-blue-500' : 'bg-gray-300'}`}
+          >
+            <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${toolsEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+          </button>
+        </div>
+        
+        {/* Utility Controls */}
+        <div className="flex gap-2">
+          <button
+            onClick={toggleConfig}
+            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
+          >
+            Config
+          </button>
+          <button
+            onClick={clearChat}
+            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+      
+      {/* Configuration Panel (conditional) */}
+      {showConfig && (
+        <div className="p-4 bg-black/5 border-b border-black/10 animate-in slide-in-from-top duration-300">
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">System Instruction:</label>
+              <textarea
+                value={systemInstruction}
+                onChange={(e) => setSystemInstruction(e.target.value)}
+                placeholder="You are a helpful assistant..."
+                className="w-full p-2 border border-gray-300 rounded-lg text-xs resize-none h-16"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">WebSocket URL:</label>
+              <input
+                type="text"
+                value={wsUrl}
+                onChange={(e) => setWsUrl(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded-lg text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">VAD Threshold:</label>
+              <input
+                type="range"
+                min="0.001"
+                max="0.1"
+                step="0.001"
+                value={vadThreshold}
+                onChange={(e) => setVadThreshold(parseFloat(e.target.value))}
+                className="w-full"
+              />
+              <span className="text-xs text-gray-500">{vadThreshold.toFixed(3)}</span>
+            </div>
             <button
-              onClick={toggleConfig}
+              onClick={saveConfig}
               className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
             >
-              Config
-            </button>
-            <button
-              onClick={clearChat}
-              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
-            >
-              Clear
+              Save Config
             </button>
           </div>
         </div>
-        
-        {/* Config Panel */}
-        {showConfig && (
-          <div className="p-4 bg-black/5 border-b border-black/10 animate-in slide-in-from-top duration-300">
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">System Instruction:</label>
-                <textarea
-                  value={systemInstruction}
-                  onChange={(e) => setSystemInstruction(e.target.value)}
-                  placeholder="You are a helpful assistant..."
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs resize-none h-16"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">WebSocket URL:</label>
-                <input
-                  type="text"
-                  value={wsUrl}
-                  onChange={(e) => setWsUrl(e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">VAD Threshold:</label>
-                <input
-                  type="range"
-                  min="0.001"
-                  max="0.1"
-                  step="0.001"
-                  value={vadThreshold}
-                  onChange={(e) => setVadThreshold(parseFloat(e.target.value))}
-                  className="w-full"
-                />
-                <span className="text-xs text-gray-500">{vadThreshold.toFixed(3)}</span>
-              </div>
-              <button
-                onClick={saveConfig}
-                className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
-              >
-                Save Config
-              </button>
-            </div>
-          </div>
-        )}
- </div>
- </div>
-  )       
+      )}
+    </div>
+  </div>
+);     
 }
 
 
