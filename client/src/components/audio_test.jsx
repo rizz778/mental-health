@@ -1,1060 +1,713 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'; 
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 
-const AudioTest = () => {
-  // Connection state
+const AudioRecorder = () => {
   const [isConnected, setIsConnected] = useState(false);
-  const [hasActiveSession, setHasActiveSession] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
-  
-  // UI state
-  const [toolsEnabled, setToolsEnabled] = useState(false);
-  const [showConfig, setShowConfig] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
-  
-  // Audio state
   const [isRecording, setIsRecording] = useState(false);
-  const [audioEnabled, setAudioEnabled] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [pushToTalk, setPushToTalk] = useState(false);
-  const [vadThreshold, setVadThreshold] = useState(0.01);
-
-
-  // Add this state variable
-const [isProcessingAudio, setIsProcessingAudio] = useState(false);
-   const [isManualRecording, setIsManualRecording] = useState(false);
-
-  // Messages and input
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      type: 'system',
-      content: 'Welcome to Live API Chat Demo! Connect to the WebSocket server and start a session to begin chatting.'
-    }
-  ]);
-  const [messageInput, setMessageInput] = useState('');
-  const [currentResponse, setCurrentResponse] = useState('');
-  const currentResponseRef = useRef('');
+  const [status, setStatus] = useState('Not Connected');
+  const [responses, setResponses] = useState([]);
+  const [debugLogs, setDebugLogs] = useState([]);
   
-  // Config
-  const [systemInstruction, setSystemInstruction] = useState('');
-  const [wsUrl, setWsUrl] = useState('ws://localhost:8000');
-  
-  // Stats
-  const [totalTokens, setTotalTokens] = useState(0);
-  
-  // Status messages
-  const [errorMessage, setErrorMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
-  
-  // Audio refs
-  const mediaStreamRef = useRef(null);
+  const websocketRef = useRef(null);
   const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const processorRef = useRef(null);
-  const silenceTimeoutRef = useRef(null);
-  const audioBufferRef = useRef([]);
+  const workletNodeRef = useRef(null);
+  const sourceRef = useRef(null);
+  const streamRef = useRef(null);
+  const isProcessingRef = useRef(false);
+  // Add a ref to track recording state for use in callbacks
+  const isRecordingRef = useRef(false);
+  // Add a ref to track if component is mounting for the first time
+  const isMountingRef = useRef(true);
+  // Add throttling ref
+  const lastSendTimeRef = useRef(0);
   
-const [audioChunks, setAudioChunks] = useState([]);
-const mediaRecorderRef = useRef(null);
-const streamRef = useRef(null);
-
-  // Refs
-  const wsRef = useRef(null);
-  const messagesEndRef = useRef(null);
-  const messageIdRef = useRef(2);
+  // Add connection persistence
+  const connectionIdRef = useRef(Math.random().toString(36).substr(2, 9));
   
-  // Session resumption handle
-  const [sessionHandle, setSessionHandle] = useState(null);
-  const [resumeHandle, setResumeHandle] = useState(null);
-  const [shouldReconnect, setShouldReconnect] = useState(false);
-  const [isPlayingResponse,setIsPlayingResponse]=useState(false)
-  // Auto-scroll to bottom
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-  // Add this useEffect to monitor audio state
-useEffect(() => {
-  console.log('[Client] Audio State:', {
-    audioEnabled,
-    isSpeaking,
-    isRecording,
-    hasActiveSession,
-    pushToTalk,
-    bufferLength: audioBufferRef.current?.length || 0
-  });
-}, [audioEnabled, isSpeaking, isRecording, hasActiveSession, pushToTalk]);
-useEffect(() => {
-    scrollToBottom();
-  }, [messages, isTyping, currentResponse]);
-  
-  // Auto-hide status messages
+  // Prevent cleanup during development double-mounting
   useEffect(() => {
-    if (errorMessage) {
-      const timer = setTimeout(() => setErrorMessage(''), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [errorMessage]);
-  
-  useEffect(() => {
-    if (successMessage) {
-      const timer = setTimeout(() => setSuccessMessage(''), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [successMessage]);
-  
-  useEffect(() => {
-    if (shouldReconnect && resumeHandle) {
-      setShouldReconnect(false);
-      setTimeout(() => {
-        console.log('[Client] Triggering session reconnect with resume handle:', resumeHandle);
-        connect(true);
-      }, 500);
-    }
-  }, [shouldReconnect, resumeHandle]);
-// Add this useEffect to monitor audio buffer during manual recording:
-useEffect(() => {
-  let intervalId;
-  
-  if (isManualRecording) {
-    intervalId = setInterval(() => {
-      console.log('[Client] Manual recording buffer status:', {
-        bufferLength: audioBufferRef.current?.length || 0,
-        audioEnabled,
-        hasActiveSession,
-        mediaStreamActive: mediaStreamRef.current?.active || false
-      });
-    }, 1000); // Log every second during recording
-  }
-  
-  return () => {
-    if (intervalId) {
-      clearInterval(intervalId);
-    }
-  };
-}, [isManualRecording, audioEnabled, hasActiveSession]);
-  // Voice Activity Detection
-  const analyzeAudio = useCallback((audioData) => {
-  // Calculate RMS (Root Mean Square) for better voice detection
-  const rms = Math.sqrt(audioData.reduce((acc, val) => acc + val * val, 0) / audioData.length);
-  
-  // Also check for consistent energy over multiple samples
-  const sum = audioData.reduce((acc, val) => acc + Math.abs(val), 0);
-  const average = sum / audioData.length;
-  
-  // Use both RMS and average with your threshold
-  const isVoice = rms > vadThreshold || average > vadThreshold * 0.5;
-  
-  if (isVoice) {
-    console.log('[Client] Voice detected - RMS:', rms.toFixed(4), 'Avg:', average.toFixed(4));
-  }
-  
-  return isVoice;
-}, [vadThreshold]);
-
-// Manual start recording function
-// Replace your startRecording function with this:
-// Replace your startRecording function with this simpler version:
-const startRecording = async () => {
-  try {
-    console.log('[Client] Starting manual recording');
-    
-    // Clear any existing buffer
-    audioBufferRef.current = [];
-    
-    // If audio is not enabled, initialize it first
-    if (!audioEnabled) {
-      await initializeAudio();
-    }
-    
-    setIsManualRecording(true);
-    console.log('[Client] Manual recording started - audio will be buffered');
-    
-  } catch (error) {
-    console.error('Error starting recording:', error);
-    showError('Failed to start recording: ' + error.message);
-  }
-};
-// Manual stop recording function
-// Replace your stopRecording function with this:
-const stopRecording = () => {
-  if (!isManualRecording) {
-    console.log('[Client] Not in manual recording mode');
-    return;
-  }
-  
-  console.log('[Client] Stopping manual recording');
-  console.log('[Client] Audio buffer length:', audioBufferRef.current.length);
-  
-  setIsManualRecording(false);
-  setIsProcessingAudio(true);
-  
-  if (audioBufferRef.current.length > 0) {
-    console.log('[Client] Sending audio chunks to server - buffer size:', audioBufferRef.current.length);
-    sendAudioToServer();
-  } else {
-    console.log('[Client] No audio recorded - buffer is empty');
-    showError('No audio recorded');
-    setIsProcessingAudio(false);
-  }
-};
-
-
-  // Audio processing
-  // Replace your processAudioData function with this:
-// Replace your processAudioData function with this complete version:
-const processAudioData = useCallback((audioData) => {
-  if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !hasActiveSession) {
-    return;
-  }
-  
-  // For manual recording, always buffer the audio
-  if (isManualRecording) {
-    audioBufferRef.current.push(...audioData);
-    console.log('[Client] Manual recording: buffered', audioData.length, 'samples. Total:', audioBufferRef.current.length);
-    return;
-  }
-  
-  // For push-to-talk mode, only process when recording
-  if (pushToTalk && !isRecording) {
-    return;
-  }
-  
-  // For regular audio mode, only process when audio is enabled
-  if (!audioEnabled) {
-    return;
-  }
-  
-  // For automatic VAD detection
-  const isCurrentlySpeaking = analyzeAudio(audioData);
-  
-  if (isCurrentlySpeaking) {
-    // Only buffer audio when speech is detected
-    if (!isSpeaking) {
-      console.log('[Client] Speech detected, starting to buffer audio');
-      setIsSpeaking(true);
-    }
-    audioBufferRef.current.push(...audioData);
-    
-    // Clear silence timeout
-    if (silenceTimeoutRef.current) {
-      clearTimeout(silenceTimeoutRef.current);
-      silenceTimeoutRef.current = null;
-    }
-  } else if (isSpeaking) {
-    // Start silence timeout only if we were speaking
-    if (!silenceTimeoutRef.current) {
-      silenceTimeoutRef.current = setTimeout(() => {
-        console.log('[Client] Silence detected, sending audio');
-        sendAudioToServer();
-        setIsSpeaking(false);
-        silenceTimeoutRef.current = null;
-      }, 800);
-    }
-  }
-}, [analyzeAudio, hasActiveSession, isSpeaking, isManualRecording, pushToTalk, isRecording, audioEnabled]);
-
-  const sendAudioToServer = useCallback(() => {
-  if (audioBufferRef.current.length === 0) return;
-  
-  console.log('[Client] Sending audio buffer length:', audioBufferRef.current.length);
-  
-  // Convert float32 to int16
-  const int16Array = new Int16Array(audioBufferRef.current.length);
-  for (let i = 0; i < audioBufferRef.current.length; i++) {
-    int16Array[i] = Math.max(-32768, Math.min(32767, audioBufferRef.current[i] * 32768));
-  }
-  
-  // Convert to base64
-  const bytes = new Uint8Array(int16Array.buffer);
-  const base64Audio = btoa(String.fromCharCode.apply(null, bytes));
-  
-  const audioMessage = {
-    clientContent: {
-      turns: [{
-        role: 'user',
-        parts: [{
-          inlineData: {
-            mimeType: 'audio/pcm;rate=16000;channels=1', // Fixed format
-            data: base64Audio
-          }
-        }]
-      }],
-      turnComplete: true
-    }
-  };
-  
-  console.log('[Client] Sending audio message to Gemini');
-  wsRef.current.send(JSON.stringify(audioMessage));
-  
-  // Clear buffer
-  audioBufferRef.current = [];
-  setIsTyping(true);
-}, []);
-
-  // Initialize audio
-  // Replace your initializeAudio function with this:
-const initializeAudio = useCallback(async () => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        sampleRate: 16000,
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true
-      }
-    });
-    
-    mediaStreamRef.current = stream;
-    
-    // Create audio context
-    audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
-      sampleRate: 16000
-    });
-    
-    const source = audioContextRef.current.createMediaStreamSource(stream);
-    analyserRef.current = audioContextRef.current.createAnalyser();
-    analyserRef.current.fftSize = 2048;
-    
-    // Create script processor for audio data
-    processorRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
-    
-    processorRef.current.onaudioprocess = (event) => {
-      const inputData = event.inputBuffer.getChannelData(0);
-      const audioData = new Float32Array(inputData);
-      
-      // Always process audio data - let processAudioData handle the logic
-      processAudioData(audioData);
-    };
-    
-    source.connect(analyserRef.current);
-    analyserRef.current.connect(processorRef.current);
-    processorRef.current.connect(audioContextRef.current.destination);
-    
-    showSuccess('Audio initialized successfully');
-    setAudioEnabled(true);
-    
-  } catch (error) {
-    showError('Failed to initialize audio: ' + error.message);
-    console.error('[Client] Audio initialization error:', error);
-  }
-}, [processAudioData]);
-  // Cleanup audio
-  const cleanupAudio = useCallback(() => {
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    if (analyserRef.current) {
-      analyserRef.current.disconnect();
-      analyserRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    setAudioEnabled(false);
-    setIsRecording(false);
-    setIsSpeaking(false);
-  }, []);
-  const playAudioResponse = useCallback(async (base64Audio) => {
-  try {
-    setIsPlayingResponse(true);
-    
-    // Decode base64 to binary
-    const binaryString = atob(base64Audio);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    
-    // Create audio context if not exists or if closed
-    if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    
-    // Resume context if suspended
-    if (audioContextRef.current.state === 'suspended') {
-      await audioContextRef.current.resume();
-    }
-    
-    // Decode and play audio
-    const audioBuffer = await audioContextRef.current.decodeAudioData(bytes.buffer);
-    const source = audioContextRef.current.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContextRef.current.destination);
-    
-    source.onended = () => {
-      setIsPlayingResponse(false);
-      console.log('[Client] Audio response playback finished');
-    };
-    
-    source.start();
-    console.log('[Client] Playing audio response');
-    
-  } catch (error) {
-    console.error('[Client] Error playing audio response:', error);
-    setIsPlayingResponse(false);
-    showError('Failed to play audio response: ' + error.message);
-  }
-}, []);
-  // WebSocket message handler
-  const handleServerMessage = useCallback((data) => {
-    if (data.type === 'session_warning' && data.resume_handle) {
-      setResumeHandle(data.resume_handle);
-      setShouldReconnect(true);
-      addSystemMessage('Session expiring, reconnecting to resume...');
-    }
-    
-    // Handle serverContent from Gemini Live API
-    if (data.serverContent) {
-      const modelTurn = data.serverContent.modelTurn;
-      if (modelTurn && modelTurn.parts && modelTurn.parts.length > 0) {
-        const part = modelTurn.parts[0];
-        
-        // Handle text response
-        if (part.text) {
-          setCurrentResponse(prev => {
-            const updated = prev + part.text;
-            currentResponseRef.current = updated;
-            return updated;
-          });
-          setIsTyping(true);
-        }
-        
-        // Handle audio response (if supported)
-        if (part.inlineData && part.inlineData.mimeType.startsWith('audio/')) {
-          console.log('[Client] Received audio response');
-          playAudioResponse(part.inlineData.data);
-        }
-      }
-      
-      if (data.serverContent.generationComplete) {
-        setIsProcessingAudio(false);
-        if(currentResponseRef.current){
-          addMessage('model',currentResponseRef.current);
-        }
-        setCurrentResponse('');
-        currentResponseRef.current = '';
-        setIsTyping(false);
-      }
-      
-      if (data.serverContent.turnComplete) {
-        console.log('[Client] Turn complete');
-      }
-      return;
-    }
-    
-    // Handle setupComplete to mark session as active
-    if (data.setupComplete !== undefined) {
-      setHasActiveSession(true);
-      addSystemMessage('Session setup complete - You can now send messages or speak');
-      return;
-    }
-    
-    // Handle other message types
-    switch (data.type) {
-      case 'connection_established':
-        showSuccess(data.message || 'Connected to Live API Bridge');
-        break;
-        
-      case 'audio_response':
-        if (data.audio_data) {
-          console.log('[Client] Received audio response from server');
-          playAudioResponse(data.content);
-  }
-  break;  
-      case 'session_started':
-        setHasActiveSession(true);
-        showSuccess('Session started successfully');
-        addSystemMessage('Session started - You can now send messages or speak');
-        break;
-        
-      case 'session_ended':
-        setHasActiveSession(false);
-        addSystemMessage('Session ended');
-        break;
-        
-      case 'text_chunk':
-        if (!data.complete) {
-          setIsTyping(true);
-          setCurrentResponse(prev => {
-            const updated = prev + data.content;
-            currentResponseRef.current = updated;
-            return updated;
-          });
-        }
-        break;
-        
-      case 'generation_complete':
-        setIsTyping(false);
-        if (currentResponseRef.current) {
-          addMessage('model', currentResponseRef.current);
-        }
-        setCurrentResponse('');
-        currentResponseRef.current = '';
-        break;
-        
-      case 'message_sent':
-        console.log('[Client] Message acknowledged by server');
-        break;
-        
-      case 'usage_update':
-        if (data.total_tokens) {
-          setTotalTokens(data.total_tokens);
-        }
-        break;
-        
-      case 'tool_call':
-        addSystemMessage(`Tool called: ${data.tool_call}`);
-        break;
-        
-      case 'interrupted':
-        setIsTyping(false);
-        setCurrentResponse('');
-        currentResponseRef.current = '';
-        addSystemMessage('Generation was interrupted');
-        break;
-        
-      case 'session_warning':
-        showError(data.message || 'Session warning');
-        break;
-        
-      case 'configuration_updated':
-        showSuccess(data.message || 'Configuration updated');
-        break;
-        
-      case 'error':
-        setIsTyping(false);
-        setCurrentResponse('');
-        currentResponseRef.current = '';
-        showError(data.message || 'An error occurred');
-        break;
-        
-      case 'session_resumption_update':
-        if (data.handle) {
-          setSessionHandle(data.handle);
-          addSystemMessage('Session can be resumed.');
-        }
-        break;
-        
-      default:
-        console.log('[Client] Unhandled message type:', data.type, data);
+    if (isMountingRef.current) {
+      isMountingRef.current = false;
+      console.log(`[AudioRecorder] Initial component mount - Connection ID: ${connectionIdRef.current}`);
+    } else {
+      console.log(`[AudioRecorder] Component remount detected (likely React StrictMode) - Connection ID: ${connectionIdRef.current}`);
     }
   }, []);
-  
-  // Helper functions
-  const addMessage = (type, content) => {
-    if (type !== 'user' && type !== 'model' && type !== 'system') return;
-    const newMessage = {
-      id: messageIdRef.current++,
-      type,
-      content,
-      timestamp: new Date()
-    };
-    setMessages(prev => [...prev, newMessage]);
-  };
-  
-  const addSystemMessage = (content) => {
-    addMessage('system', content);
-  };
-  
-  const showError = (message) => {
-    setErrorMessage(message);
-    console.error('[Client] Error:', message);
-  };
-  
-  const showSuccess = (message) => {
-    setSuccessMessage(message);
-  };
-  
-  const sendToServer = (message) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message));
-    }
-  };
-  
-  // Build conversation turns for Gemini
-  const buildConversationTurns = (newUserMessage = null) => {
-    const conversationMessages = messages.filter(m => m.type === 'user' || m.type === 'model');
-    const turns = [];
-    conversationMessages.forEach(msg => {
-      if (msg.type === 'user') {
-        turns.push({ role: 'user', parts: [{ text: msg.content.trim() }] });
-      } else if (msg.type === 'model') {
-        turns.push({ role: 'model', parts: [{ text: msg.content.trim() }] });
-      }
-    });
-    if (newUserMessage) {
-      turns.push({ role: 'user', parts: [{ text: newUserMessage.trim() }] });
-    }
-    
-    let lastRole = null;
-    const filteredTurns = [];
-    for (const turn of turns) {
-      if (turn.role !== lastRole) {
-        filteredTurns.push(turn);
-        lastRole = turn.role;
-      }
-    }
 
-    return filteredTurns;
-  };
-  
-  // Connection handlers
-  const connect = async () => {
-    const url = wsUrl.trim();
-    if (!url) {
-      showError('Please enter a WebSocket URL');
+  // Update the ref whenever the state changes
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+    console.log(`[AudioRecorder] Updated isRecordingRef to: ${isRecording}`);
+  }, [isRecording]);
+
+  // Utility function to add debug logs
+  const addLog = useCallback((message) => {
+    console.log(`[AudioRecorder] ${message}`);
+    const timestamp = new Date().toLocaleTimeString();
+    setDebugLogs(prev => {
+      const newLogs = [...prev, `${timestamp}: ${message}`];
+      return newLogs.slice(-50); // Keep only last 50 logs to prevent memory issues
+    });
+  }, []);
+
+  // Add response to the UI
+  const addResponse = useCallback((type, content) => {
+    console.log(`[AudioRecorder] Adding response - Type: ${type}, Content: ${content}`);
+    setResponses(prev => {
+      const newResponses = [...prev, { type, content, timestamp: new Date().toLocaleTimeString() }];
+      return newResponses.slice(-20); // Keep only last 20 responses
+    });
+  }, []);
+
+  // Convert Float32Array to 16-bit PCM
+  const float32To16BitPCM = useCallback((float32Array) => {
+    console.log(`[AudioRecorder] Converting Float32Array to PCM - Length: ${float32Array.length}`);
+    const buffer = new ArrayBuffer(float32Array.length * 2);
+    const view = new DataView(buffer);
+    let offset = 0;
+    for (let i = 0; i < float32Array.length; i++, offset += 2) {
+      let s = Math.max(-1, Math.min(1, float32Array[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    console.log(`[AudioRecorder] PCM conversion complete - Buffer size: ${buffer.byteLength} bytes`);
+    return buffer;
+  }, []);
+
+  // Convert ArrayBuffer to base64
+  const arrayBufferToBase64 = useCallback((buffer) => {
+    console.log(`[AudioRecorder] Converting ArrayBuffer to base64 - Size: ${buffer.byteLength} bytes`);
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = btoa(binary);
+    console.log(`[AudioRecorder] Base64 conversion complete - Length: ${base64.length} chars`);
+    return base64;
+  }, []);
+
+  // Send audio data with throttling
+  const sendAudioData = useCallback((audioData) => {
+    const now = Date.now();
+    const timeSinceLastSend = now - lastSendTimeRef.current;
+    
+    console.log(`[AudioRecorder] sendAudioData called - Time since last send: ${timeSinceLastSend}ms`);
+    
+    if (timeSinceLastSend < 100) { // Throttle to max 10 chunks per second
+      console.log(`[AudioRecorder] Throttling audio data - too soon (${timeSinceLastSend}ms < 100ms)`);
       return;
     }
+    
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN && !isProcessingRef.current) {
+      try {
+        isProcessingRef.current = true;
+        console.log(`[AudioRecorder] Sending audio chunk - Data length: ${audioData.length} chars`);
+        
+        const message = {
+          type: 'audio_chunk',
+          data: audioData
+        };
+        
+        websocketRef.current.send(JSON.stringify(message));
+        lastSendTimeRef.current = now;
+        console.log(`[AudioRecorder] Audio chunk sent successfully`);
+      } catch (error) {
+        console.error(`[AudioRecorder] Error sending audio:`, error);
+        addLog(`Error sending audio: ${error.message}`);
+      } finally {
+        isProcessingRef.current = false;
+      }
+    } else {
+      console.log(`[AudioRecorder] Cannot send audio data - WebSocket state:`, websocketRef.current?.readyState, 'isProcessing:', isProcessingRef.current);
+    }
+  }, [addLog]);
 
+  // WebSocket connection with improved error handling
+  const connect = useCallback(async () => {
+    console.log(`[AudioRecorder] Connect function called`);
+    console.log(`[AudioRecorder] Current WebSocket state:`, websocketRef.current?.readyState);
+    
     try {
-      wsRef.current = new WebSocket(url);
+      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+        console.log(`[AudioRecorder] Already connected, skipping connection attempt`);
+        addLog('Already connected');
+        return;
+      }
 
-      wsRef.current.onopen = () => {
+      console.log(`[AudioRecorder] Initiating WebSocket connection to ws://localhost:8000/`);
+      addLog('Connecting to WebSocket...');
+      websocketRef.current = new WebSocket('ws://localhost:8000/');
+      
+      // Set up connection timeout
+      const connectionTimeout = setTimeout(() => {
+        console.log(`[AudioRecorder] Connection timeout triggered`);
+        if (websocketRef.current && websocketRef.current.readyState === WebSocket.CONNECTING) {
+          websocketRef.current.close();
+          addLog('Connection timeout');
+        }
+      }, 10000);
+      
+      websocketRef.current.onopen = async () => {
+        console.log(`[AudioRecorder] WebSocket onopen event triggered`);
+        clearTimeout(connectionTimeout);
+        addLog('WebSocket connected');
+        setStatus('Connected');
         setIsConnected(true);
-        setConnectionStatus('Connected');
-        showSuccess('Connected to WebSocket server');
         
-        // Send initial setup message with audio support
-       // In your connect function, replace the setupMsg:
-const setupMsg = {
-  setup: {
-    model: 'gemini-2.0-flash-live-001',
-    generationConfig: {
-      responseModalities: ['AUDIO'],
-      speechConfig:  {
-        voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName: "Aoede"
+        // Send setup message
+        const setupMessage = {
+          setup: {
+            model: "gemini-2.5-flash-preview-native-audio-dialog",
+            generationConfig: {
+              responseModalities: ["AUDIO"]
+            },
+            systemInstruction: "You are a helpful AI assistant. Provide clear and concise responses."
           }
+        };
+        
+        console.log(`[AudioRecorder] Sending setup message:`, setupMessage);
+        
+        try {
+          websocketRef.current.send(JSON.stringify(setupMessage));
+          console.log(`[AudioRecorder] Setup message sent successfully`);
+          addLog('Setup message sent');
+        } catch (error) {
+          console.error(`[AudioRecorder] Error sending setup:`, error);
+          addLog(`Error sending setup: ${error.message}`);
         }
-      }
-    },
-    systemInstruction: systemInstruction.trim() || undefined,
-    tools: toolsEnabled ? [
-      {
-        functionDeclarations: []
-      }
-    ] : undefined
-  }
-};
-        wsRef.current.send(JSON.stringify(setupMsg));
-        if (resumeHandle) {
-          console.log('[Client] Reconnected and sent setup with resume handle:', resumeHandle);
-        }
-        setResumeHandle(null);
       };
-
-      wsRef.current.onmessage = (event) => {
+      
+      websocketRef.current.onmessage = (event) => {
+        console.log(`[AudioRecorder] WebSocket onmessage event triggered`);
+        console.log(`[AudioRecorder] Raw message data:`, event.data);
+        
         try {
           const data = JSON.parse(event.data);
-          handleServerMessage(data);
-        } catch (error) {
-          console.error('[Client] Error parsing server message:', error);
-        }
-      };
-
-      wsRef.current.onclose = (event) => {
-        setIsConnected(false);
-        setHasActiveSession(false);
-        setConnectionStatus('Disconnected');
-        setIsTyping(false);
-        setCurrentResponse('');
-        currentResponseRef.current = '';
-        addSystemMessage(`Disconnected from server (Code: ${event.code})`);
-        if (resumeHandle) {
-          console.log('[Client] Disconnected, will attempt to reconnect with resume handle:', resumeHandle);
-          setTimeout(() => {
-            connect(true);
-          }, 500);
-        }
-      };
-
-      wsRef.current.onerror = (error) => {
-        showError('WebSocket connection error');
-        console.error('[Client] WebSocket error:', error);
-      };
-
-    } catch (error) {
-      showError('Failed to connect: ' + error.message);
-    }
-  };
-  
-  const disconnect = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-      console.log('[Client] Manually disconnected from WebSocket server');
-    }
-  };
-  
-  // Session handlers
-  const startSession = async () => {
-    if (!isConnected) {
-      showError('Not connected to server');
-      return;
-    }
-    
-    const message = messageInput.trim();
-    if (!message) {
-      showError('Please enter a message to start the session.');
-      return;
-    }
-    const turns = buildConversationTurns(message);
-    
-    const payload = {
-      clientContent: {
-        turns: turns,
-        turnComplete: true
-      }
-    };
-    
-    console.log('[Client] Starting session with payload:', payload);
-    sendToServer(payload);
-    
-    addMessage('user', message);
-    setMessageInput('');
-    setIsTyping(true);
-    setCurrentResponse('');
-    currentResponseRef.current = '';
-  };
-  
-  const endSession = async () => {
-    if (!hasActiveSession) return;
-    
-    sendToServer({
-      type: "end_session"
-    });
-    console.log('[Client] End session request sent');
-  };
-  
-  // Message handlers
-  const sendMessage = async () => {
-    const message = messageInput.trim();
-    if (!message || !hasActiveSession || isTyping) {
-      console.log('[Client] Cannot send message:', { message: !!message, hasActiveSession, isTyping });
-      return;
-    }
-    
-    const turns = buildConversationTurns(message);
-    const payload = {
-      clientContent: {
-        turns: turns,
-        turnComplete: true
-      }
-    };
-    
-    console.log('[Client] Sending message with payload:', payload);
-    sendToServer(payload);
-    
-    addMessage('user', message);
-    setMessageInput('');
-    setIsTyping(true);
-    setCurrentResponse('');
-    currentResponseRef.current = '';
-  };
-  
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (hasActiveSession) {
-        sendMessage();
-      } else {
-        startSession();
-      }
-    }
-  };
-
-  // Control handlers
-  const toggleTools = () => {
-    setToolsEnabled(!toolsEnabled);
-  };
-  
-  const toggleConfig = () => {
-    setShowConfig(!showConfig);
-  };
-  
-  const toggleAudio = () => {
-    if (audioEnabled) {
-      cleanupAudio();
-    } else {
-      initializeAudio();
-    }
-  };
-  
-  const togglePushToTalk = () => {
-    setPushToTalk(!pushToTalk);
-    
-  };
-  
-  const handlePushToTalkMouseDown = () => {
-    if (pushToTalk && audioEnabled && hasActiveSession) {
-      setIsRecording(true);
-    }
-  };
-  
-  const handlePushToTalkMouseUp = () => {
-    if (pushToTalk && isRecording) {
-      setIsRecording(false);
-      if (audioBufferRef.current.length > 0) {
-        sendAudioToServer();
-      }
-    }
-  };
-  // Also add these event handlers to prevent context menu and improve UX:
-const handlePushToTalkMouseLeave = () => {
-  if (pushToTalk && isRecording) {
-    console.log('[Client] Push-to-talk: Mouse left button, stopping recording');
-    setIsRecording(false);
-    if (audioBufferRef.current.length > 0) {
-      sendAudioToServer();
-    }
-  }
-};
-  const clearChat = () => {
-    setMessages([{
-      id: 1,
-      type: 'system',
-      content: 'Chat cleared. Welcome to Live API Chat Demo!'
-    }]);
-    messageIdRef.current = 2;
-    setTotalTokens(0);
-    setSessionHandle(null);
-    setCurrentResponse('');
-    currentResponseRef.current = '';
-    setIsTyping(false);
-    console.log('[Client] Chat cleared');
-  };
-  
-  const saveConfig = () => {
-    showSuccess('Configuration saved');
-    setShowConfig(false);
-    console.log('[Client] Configuration saved:', { systemInstruction, wsUrl, toolsEnabled, vadThreshold });
-  };
-  
-return (
-  <div className="min-h-screen bg-gradient-to-br from-blue-400 via-purple-500 to-purple-700 flex items-center justify-center p-5">
-    <div className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl w-full max-w-4xl h-[600px] flex flex-col overflow-hidden border border-white/20">
-      
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-500 to-cyan-400 text-white p-5 text-center">
-        <h1 className="text-2xl font-bold mb-1">Live API Audio Chat Demo</h1>
-        <div className="flex items-center justify-center gap-2 text-sm opacity-90">
-          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'} animate-pulse`}></div>
-          <span>{connectionStatus}</span>
-          {audioEnabled && (
-            <>
-              <div className={`w-2 h-2 rounded-full ${isSpeaking ? 'bg-red-400' : 'bg-gray-400'} animate-pulse`}></div>
-              <span>{isSpeaking ? 'Speaking' : 'Listening'}</span>
-            </>
-          )}
-        </div>
-      </div>
-      
-      {/* Controls Section */}
-      <div className="p-4 bg-black/5 border-b border-black/10 flex flex-wrap gap-3 items-center">
-        
-        {/* Connection Controls */}
-        <div className="flex gap-2">
-          <button
-            onClick={connect}
-            disabled={isConnected}
-            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-          >
-            Connect
-          </button>
-          <button
-            onClick={disconnect}
-            disabled={!isConnected}
-            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-          >
-            Disconnect
-          </button>
-        </div>
-        
-        {/* Session Controls */}
-        <div className="flex gap-2">
-          <button
-            onClick={startSession}
-            disabled={!isConnected || hasActiveSession}
-            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-          >
-            Start Session
-          </button>
-          <button
-            onClick={endSession}
-            disabled={!hasActiveSession}
-            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-          >
-            End Session
-          </button>
-        </div>
-        
-        {/* Manual Recording Controls */}
-        <div className="flex gap-2">
-          <button
-            onClick={startRecording}
-            disabled={!audioEnabled || !hasActiveSession || isManualRecording}
-            className="bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-          >
-            🎤 Start Recording
-          </button>
-          <button
-            onClick={stopRecording}
-            disabled={!isManualRecording}
-            className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-          >
-            ⏹️ Stop & Send
-          </button>
-        </div>
-        
-        {/* Audio Controls */}
-        <div className="flex gap-2">
-          <button
-            onClick={toggleAudio}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-              audioEnabled 
-                ? 'bg-green-500 text-white hover:bg-green-600' 
-                : 'bg-gray-500 text-white hover:bg-gray-600'
-            }`}
-          >
-            {audioEnabled ? '🎤 Audio On' : '🎤 Audio Off'}
-          </button>
+          console.log(`[AudioRecorder] Parsed message data:`, data);
+          addLog(`Received: ${data.type || 'unknown'}`);
           
-          <button
-            onClick={togglePushToTalk}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-              pushToTalk 
-                ? 'bg-blue-500 text-white hover:bg-blue-600' 
-                : 'bg-gray-500 text-white hover:bg-gray-600'
-            }`}
-          >
-            {pushToTalk ? 'Push-to-Talk On' : 'Push-to-Talk Off'}
-          </button>
-        </div>
+          if (data.setupComplete) {
+            console.log(`[AudioRecorder] Setup completed successfully`);
+            addLog('Setup completed successfully');
+            setStatus('Ready');
+          } else if (data.type === 'text_response') {
+            console.log(`[AudioRecorder] Received text response:`, data.content);
+            addResponse('Text Response', data.content);
+          } else if (data.type === 'audio_response') {
+            console.log(`[AudioRecorder] Received audio response - Data length:`, data.content?.length || 0);
+            addResponse('Audio Response', `Received audio data`);
+            playAudioResponse(data.content);
+          } else if (data.type === 'recording_started') {
+            console.log(`[AudioRecorder] Server confirmed recording started`);
+            addLog('Recording started on server');
+          } else if (data.type === 'recording_stopped') {
+            console.log(`[AudioRecorder] Server confirmed recording stopped`);
+            addLog('Recording stopped on server');
+          } else if (data.error) {
+            console.error(`[AudioRecorder] Server error:`, data.error);
+            addLog(`Server Error: ${data.error}`);
+            addResponse('Error', data.error);
+          } else {
+            console.log(`[AudioRecorder] Unknown message type:`, data);
+          }
+        } catch (e) {
+          console.error(`[AudioRecorder] Error parsing message:`, e);
+          console.log(`[AudioRecorder] Raw message that failed to parse:`, event.data);
+          addLog(`Error parsing message: ${e.message}`);
+        }
+      };
+      
+      websocketRef.current.onerror = (error) => {
+        console.error(`[AudioRecorder] WebSocket error event:`, error);
+        clearTimeout(connectionTimeout);
+        addLog(`WebSocket error: ${error.type || 'Unknown error'}`);
+        setStatus('Error');
+      };
+      
+      websocketRef.current.onclose = (event) => {
+        console.log(`[AudioRecorder] WebSocket onclose event - Code: ${event.code}, Reason: ${event.reason} - Connection ID: ${connectionIdRef.current}`);
+        clearTimeout(connectionTimeout);
+        addLog(`WebSocket closed: ${event.code} - ${event.reason || 'No reason'}`);
         
-        {/* Push-to-Talk Control (conditional) */}
-        {pushToTalk && audioEnabled && hasActiveSession && (
-          <div className="flex gap-2">
-            <button
-              onMouseDown={handlePushToTalkMouseDown}
-              onMouseUp={handlePushToTalkMouseUp}
-              onMouseLeave={handlePushToTalkMouseLeave}
-              onContextMenu={(e) => e.preventDefault()}
-              className={`px-6 py-3 rounded-lg text-sm font-semibold transition-all select-none ${
-                isRecording 
-                  ? 'bg-red-500 text-white shadow-lg' 
-                  : 'bg-blue-500 text-white hover:bg-blue-600'
-              }`}
-            >
-              {isRecording ? '🔴 Recording...' : '🎤 Hold to Talk'}
-            </button>
-          </div>
-        )}
+        // Only update state if this is not due to component remounting
+        if (!isMountingRef.current) {
+          setStatus('Disconnected');
+          setIsConnected(false);
+          setIsRecording(false);
+          
+          // Clean up audio resources on disconnect
+          cleanupAudioResources();
+        } else {
+          console.log(`[AudioRecorder] Ignoring close event during component remount`);
+        }
+      };
+      
+    } catch (error) {
+      console.error(`[AudioRecorder] Connection error:`, error);
+      addLog(`Connection error: ${error.message}`);
+      setStatus('Error');
+    }
+  }, [addLog, addResponse]);
+
+  // Play audio response with better error handling
+  const playAudioResponse = useCallback(async (base64Audio) => {
+    console.log(`[AudioRecorder] playAudioResponse called with data length:`, base64Audio?.length || 0);
+    
+    try {
+      if (!base64Audio) {
+        console.log(`[AudioRecorder] No audio data provided to playAudioResponse`);
+        addLog('No audio data to play');
+        return;
+      }
+
+      console.log(`[AudioRecorder] Decoding base64 audio data...`);
+      const audioData = atob(base64Audio);
+      console.log(`[AudioRecorder] Decoded audio data length:`, audioData.length);
+      
+      const audioBuffer = new ArrayBuffer(audioData.length);
+      const audioView = new Uint8Array(audioBuffer);
+      for (let i = 0; i < audioData.length; i++) {
+        audioView[i] = audioData.charCodeAt(i);
+      }
+      
+      console.log(`[AudioRecorder] Creating AudioContext for playback...`);
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      console.log(`[AudioRecorder] AudioContext created - Sample rate:`, audioContext.sampleRate);
+      
+      console.log(`[AudioRecorder] Decoding audio data...`);
+      const decodedBuffer = await audioContext.decodeAudioData(audioBuffer);
+      console.log(`[AudioRecorder] Audio decoded - Duration:`, decodedBuffer.duration, 'seconds');
+      
+      const source = audioContext.createBufferSource();
+      source.buffer = decodedBuffer;
+      source.connect(audioContext.destination);
+      
+      console.log(`[AudioRecorder] Starting audio playback...`);
+      source.start();
+      addLog('Playing audio response');
+      
+      // Clean up audio context after playback
+      source.onended = () => {
+        console.log(`[AudioRecorder] Audio playback ended, closing context`);
+        audioContext.close();
+      };
+      
+    } catch (error) {
+      console.error(`[AudioRecorder] Error playing audio:`, error);
+      addLog(`Error playing audio: ${error.message}`);
+    }
+  }, [addLog]);
+
+  // Clean up audio resources
+  const cleanupAudioResources = useCallback(() => {
+    console.log(`[AudioRecorder] cleanupAudioResources called`);
+    
+    try {
+      isProcessingRef.current = false;
+      console.log(`[AudioRecorder] Set isProcessingRef to false`);
+      
+      if (workletNodeRef.current) {
+        console.log(`[AudioRecorder] Disconnecting worklet node`);
+        workletNodeRef.current.disconnect();
+        workletNodeRef.current = null;
+      }
+      
+      if (sourceRef.current) {
+        console.log(`[AudioRecorder] Disconnecting source node`);
+        sourceRef.current.disconnect();
+        sourceRef.current = null;
+      }
+      
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        console.log(`[AudioRecorder] Closing audio context - Current state:`, audioContextRef.current.state);
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+      
+      if (streamRef.current) {
+        console.log(`[AudioRecorder] Stopping media stream tracks`);
+        streamRef.current.getTracks().forEach((track, index) => {
+          console.log(`[AudioRecorder] Stopping track ${index}:`, track.kind, track.label);
+          track.stop();
+        });
+        streamRef.current = null;
+      }
+      
+      console.log(`[AudioRecorder] Audio resources cleanup completed`);
+      addLog('Audio resources cleaned up');
+    } catch (error) {
+      console.error(`[AudioRecorder] Error cleaning up audio:`, error);
+      addLog(`Error cleaning up audio: ${error.message}`);
+    }
+  }, [addLog]);
+
+  // Disconnect WebSocket
+  const disconnect = useCallback(() => {
+    console.log(`[AudioRecorder] disconnect called - isRecording:`, isRecording);
+    
+    try {
+      if (isRecording) {
+        console.log(`[AudioRecorder] Stopping recording before disconnect`);
+        stopRecording();
+      }
+      
+      if (websocketRef.current) {
+        console.log(`[AudioRecorder] Closing WebSocket connection`);
+        websocketRef.current.close(1000, 'Client disconnect');
+        websocketRef.current = null;
+      }
+      
+      setIsConnected(false);
+      setStatus('Disconnected');
+      console.log(`[AudioRecorder] Disconnect completed`);
+      addLog('Disconnected');
+    } catch (error) {
+      console.error(`[AudioRecorder] Error disconnecting:`, error);
+      addLog(`Error disconnecting: ${error.message}`);
+    }
+  }, [isRecording, addLog]);
+
+  // Start recording with modern Web Audio API
+  const startRecording = useCallback(async () => {
+    console.log(`[AudioRecorder] startRecording called - Current state: isRecording=${isRecording}, isConnected=${isConnected}`);
+    
+    try {
+      if (isRecording) {
+        console.log(`[AudioRecorder] Already recording, skipping start`);
+        addLog('Already recording');
+        return;
+      }
+
+      console.log(`[AudioRecorder] Requesting microphone access...`);
+      addLog('Requesting microphone access...');
+      
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      
+      console.log(`[AudioRecorder] Microphone access granted - Stream tracks:`, stream.getTracks().length);
+      stream.getTracks().forEach((track, index) => {
+        console.log(`[AudioRecorder] Track ${index}:`, track.kind, track.label, `enabled=${track.enabled}`);
+      });
+      
+      streamRef.current = stream;
+      
+      console.log(`[AudioRecorder] Creating AudioContext...`);
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000
+      });
+      
+      console.log(`[AudioRecorder] AudioContext created - State:`, audioContextRef.current.state, 'Sample rate:', audioContextRef.current.sampleRate);
+      
+      // Resume audio context if suspended
+      if (audioContextRef.current.state === 'suspended') {
+        console.log(`[AudioRecorder] AudioContext suspended, resuming...`);
+        await audioContextRef.current.resume();
+        console.log(`[AudioRecorder] AudioContext resumed - New state:`, audioContextRef.current.state);
+      }
+      
+      console.log(`[AudioRecorder] Creating MediaStreamSource...`);
+      sourceRef.current = audioContextRef.current.createMediaStreamSource(stream);
+      
+      // Use AudioWorklet if available, fallback to ScriptProcessor
+      if (audioContextRef.current.audioWorklet) {
+        console.log(`[AudioRecorder] AudioWorklet available, attempting to use...`);
         
-        {/* Status Indicators */}
-        {isManualRecording && (
-          <div className="flex items-center gap-2 text-red-600">
-            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-            <span className="text-sm font-semibold">Recording...</span>
-          </div>
-        )}
+        try {
+          // Create a simple processor inline
+          const processorCode = `
+            class AudioProcessor extends AudioWorkletProcessor {
+              process(inputs, outputs, parameters) {
+                const input = inputs[0];
+                if (input.length > 0) {
+                  const inputChannel = input[0];
+                  this.port.postMessage(inputChannel);
+                }
+                return true;
+              }
+            }
+            registerProcessor('audio-processor', AudioProcessor);
+          `;
+          
+          console.log(`[AudioRecorder] Creating AudioWorklet processor...`);
+          const blob = new Blob([processorCode], { type: 'application/javascript' });
+          const processorUrl = URL.createObjectURL(blob);
+          
+          await audioContextRef.current.audioWorklet.addModule(processorUrl);
+          console.log(`[AudioRecorder] AudioWorklet module added successfully`);
+          
+          workletNodeRef.current = new AudioWorkletNode(audioContextRef.current, 'audio-processor');
+          console.log(`[AudioRecorder] AudioWorkletNode created`);
+          
+          workletNodeRef.current.port.onmessage = (event) => {
+            // Use the ref instead of the state variable
+            if (!isRecordingRef.current) {
+              console.log(`[AudioRecorder] AudioWorklet received data but not recording (ref=${isRecordingRef.current}), ignoring`);
+              return;
+            }
+            
+            const inputBuffer = event.data;
+            console.log(`[AudioRecorder] AudioWorklet received buffer - Length:`, inputBuffer.length);
+            
+            const pcmData = float32To16BitPCM(inputBuffer);
+            const base64Data = arrayBufferToBase64(pcmData);
+            sendAudioData(base64Data);
+          };
+          
+          sourceRef.current.connect(workletNodeRef.current);
+          console.log(`[AudioRecorder] AudioWorklet setup completed`);
+          
+        } catch (workletError) {
+          console.error(`[AudioRecorder] AudioWorklet failed:`, workletError);
+          addLog(`AudioWorklet failed, using ScriptProcessor: ${workletError.message}`);
+          
+          // Fallback to ScriptProcessor
+          console.log(`[AudioRecorder] Falling back to ScriptProcessor...`);
+          workletNodeRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
+          console.log(`[AudioRecorder] ScriptProcessor created with buffer size 4096`);
+          
+          workletNodeRef.current.onaudioprocess = (event) => {
+            // Use the ref instead of the state variable
+            if (!isRecordingRef.current) {
+              console.log(`[AudioRecorder] ScriptProcessor received data but not recording (ref=${isRecordingRef.current}), ignoring`);
+              return;
+            }
+            
+            const inputBuffer = event.inputBuffer.getChannelData(0);
+            console.log(`[AudioRecorder] ScriptProcessor received buffer - Length:`, inputBuffer.length);
+            
+            const pcmData = float32To16BitPCM(inputBuffer);
+            const base64Data = arrayBufferToBase64(pcmData);
+            sendAudioData(base64Data);
+          };
+          
+          sourceRef.current.connect(workletNodeRef.current);
+          workletNodeRef.current.connect(audioContextRef.current.destination);
+          console.log(`[AudioRecorder] ScriptProcessor setup completed`);
+        }
+      } else {
+        console.log(`[AudioRecorder] AudioWorklet not available, using ScriptProcessor`);
+        // Direct ScriptProcessor fallback
+        workletNodeRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
         
-        {isProcessingAudio && (
-          <div className="flex items-center gap-2 text-blue-600">
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-            <span className="text-sm font-semibold">Processing...</span>
-          </div>
-        )}
+        workletNodeRef.current.onaudioprocess = (event) => {
+          // Use the ref instead of the state variable
+          if (!isRecordingRef.current) return;
+          
+          const inputBuffer = event.inputBuffer.getChannelData(0);
+          const pcmData = float32To16BitPCM(inputBuffer);
+          const base64Data = arrayBufferToBase64(pcmData);
+          sendAudioData(base64Data);
+        };
         
-        {isPlayingResponse && (
-          <div className="flex items-center gap-2 text-green-600">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-sm font-semibold">Playing Response...</span>
-          </div>
-        )}
+        sourceRef.current.connect(workletNodeRef.current);
+        workletNodeRef.current.connect(audioContextRef.current.destination);
+      }
+      
+      // Send start recording message
+      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+        console.log(`[AudioRecorder] Sending start_recording message to server...`);
+        websocketRef.current.send(JSON.stringify({
+          type: 'start_recording'
+        }));
+        console.log(`[AudioRecorder] start_recording message sent`);
+      } else {
+        console.log(`[AudioRecorder] Cannot send start_recording - WebSocket not ready`);
+      }
+      
+      setIsRecording(true);
+      console.log(`[AudioRecorder] Recording started successfully`);
+      addLog('Recording started');
+      
+    } catch (error) {
+      console.error(`[AudioRecorder] Error starting recording:`, error);
+      addLog(`Error starting recording: ${error.message}`);
+      cleanupAudioResources();
+    }
+  }, [isRecording, isConnected, float32To16BitPCM, arrayBufferToBase64, addLog, sendAudioData, cleanupAudioResources]);
+
+  // Stop recording
+  const stopRecording = useCallback(() => {
+    console.log(`[AudioRecorder] stopRecording called - Current state: isRecording=${isRecording}`);
+    
+    if (!isRecording) {
+      console.log(`[AudioRecorder] Not currently recording, skipping stop`);
+      addLog('Not currently recording');
+      return;
+    }
+
+    setIsRecording(false);
+    console.log(`[AudioRecorder] Set isRecording to false`);
+    
+    // Send stop recording message
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      try {
+        console.log(`[AudioRecorder] Sending stop_recording message to server...`);
+        websocketRef.current.send(JSON.stringify({
+          type: 'stop_recording'
+        }));
+        console.log(`[AudioRecorder] stop_recording message sent`);
+      } catch (error) {
+        console.error(`[AudioRecorder] Error sending stop message:`, error);
+        addLog(`Error sending stop message: ${error.message}`);
+      }
+    } else {
+      console.log(`[AudioRecorder] Cannot send stop_recording - WebSocket not ready`);
+    }
+    
+    cleanupAudioResources();
+    console.log(`[AudioRecorder] Recording stopped successfully`);
+    addLog('Recording stopped');
+  }, [isRecording, addLog, cleanupAudioResources]);
+
+  // Cleanup on unmount - Remove dependencies to prevent unnecessary cleanups
+  useEffect(() => {
+    console.log(`[AudioRecorder] Component mounted, setting up cleanup effect`);
+    
+    return () => {
+      console.log(`[AudioRecorder] Component unmounting, cleaning up...`);
+      
+      // Only cleanup if we actually have active resources
+      if (isRecording) {
+        console.log(`[AudioRecorder] Stopping recording during unmount`);
+        setIsRecording(false);
+      }
+      
+      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+        console.log(`[AudioRecorder] Closing WebSocket during unmount`);
+        websocketRef.current.close(1000, 'Component unmount');
+      }
+      
+      // Clean up audio resources
+      if (audioContextRef.current || streamRef.current || workletNodeRef.current || sourceRef.current) {
+        console.log(`[AudioRecorder] Cleaning up audio resources during unmount`);
         
-        {/* Tools Toggle */}
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold text-gray-600">Tools:</label>
-          <button
-            onClick={toggleTools}
-            className={`relative w-10 h-5 rounded-full transition-colors ${toolsEnabled ? 'bg-blue-500' : 'bg-gray-300'}`}
-          >
-            <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${toolsEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
-          </button>
-        </div>
-        
-        {/* Utility Controls */}
-        <div className="flex gap-2">
-          <button
-            onClick={toggleConfig}
-            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
-          >
-            Config
-          </button>
-          <button
-            onClick={clearChat}
-            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
-          >
-            Clear
-          </button>
+        try {
+          if (workletNodeRef.current) {
+            workletNodeRef.current.disconnect();
+            workletNodeRef.current = null;
+          }
+          
+          if (sourceRef.current) {
+            sourceRef.current.disconnect();
+            sourceRef.current = null;
+          }
+          
+          if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+            audioContextRef.current.close();
+            audioContextRef.current = null;
+          }
+          
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+          }
+        } catch (error) {
+          console.error(`[AudioRecorder] Error during unmount cleanup:`, error);
+        }
+      }
+      
+      console.log(`[AudioRecorder] Component cleanup completed`);
+    };
+  }, []); // Empty dependency array to prevent re-running
+
+  // Debug effect to log state changes
+  useEffect(() => {
+    console.log(`[AudioRecorder] State change - Status: ${status}, Connected: ${isConnected}, Recording: ${isRecording}`);
+  }, [status, isConnected, isRecording]);
+  return (
+    <div className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6">Voice Chat with Gemini</h1>
+      
+      <div className="flex flex-wrap gap-4 mb-6">
+        <button 
+          onClick={() => {
+            console.log(`[AudioRecorder] Connect button clicked`);
+            connect();
+          }} 
+          disabled={isConnected}
+          className="px-4 py-2 bg-blue-500 text-white rounded disabled:bg-gray-300 hover:bg-blue-600"
+        >
+          Connect
+        </button>
+        <button 
+          onClick={() => {
+            console.log(`[AudioRecorder] Disconnect button clicked`);
+            disconnect();
+          }} 
+          disabled={!isConnected}
+          className="px-4 py-2 bg-gray-500 text-white rounded disabled:bg-gray-300 hover:bg-gray-600"
+        >
+          Disconnect
+        </button>
+        <button 
+          onClick={() => {
+            console.log(`[AudioRecorder] Start Recording button clicked`);
+            startRecording();
+          }} 
+          disabled={!isConnected || isRecording}
+          className="px-4 py-2 bg-green-500 text-white rounded disabled:bg-gray-300 hover:bg-green-600"
+        >
+          Start Recording
+        </button>
+        <button 
+          onClick={() => {
+            console.log(`[AudioRecorder] Stop Recording button clicked`);
+            stopRecording();
+          }} 
+          disabled={!isRecording}
+          className="px-4 py-2 bg-red-500 text-white rounded disabled:bg-gray-300 hover:bg-red-600"
+        >
+          Stop Recording
+        </button>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="bg-gray-100 p-4 rounded">
+          <p><strong>Status:</strong> <span className={`font-semibold ${status === 'Ready' ? 'text-green-600' : status === 'Error' ? 'text-red-600' : 'text-yellow-600'}`}>{status}</span></p>
+          <p><strong>Recording:</strong> <span className={`font-semibold ${isRecording ? 'text-red-600' : 'text-gray-600'}`}>{isRecording ? 'Recording...' : 'Not Recording'}</span></p>
         </div>
       </div>
       
-      {/* Configuration Panel (conditional) */}
-      {showConfig && (
-        <div className="p-4 bg-black/5 border-b border-black/10 animate-in slide-in-from-top duration-300">
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">System Instruction:</label>
-              <textarea
-                value={systemInstruction}
-                onChange={(e) => setSystemInstruction(e.target.value)}
-                placeholder="You are a helpful assistant..."
-                className="w-full p-2 border border-gray-300 rounded-lg text-xs resize-none h-16"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">WebSocket URL:</label>
-              <input
-                type="text"
-                value={wsUrl}
-                onChange={(e) => setWsUrl(e.target.value)}
-                className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">VAD Threshold:</label>
-              <input
-                type="range"
-                min="0.001"
-                max="0.1"
-                step="0.001"
-                value={vadThreshold}
-                onChange={(e) => setVadThreshold(parseFloat(e.target.value))}
-                className="w-full"
-              />
-              <span className="text-xs text-gray-500">{vadThreshold.toFixed(3)}</span>
-            </div>
-            <button
-              onClick={saveConfig}
-              className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
-            >
-              Save Config
-            </button>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <h3 className="text-xl font-semibold mb-3">Gemini Responses:</h3>
+          <div className="border border-gray-300 p-4 h-64 overflow-y-auto bg-gray-50 rounded">
+            {responses.length === 0 ? (
+              <p className="text-gray-500 italic">No responses yet...</p>
+            ) : (
+              responses.map((response, index) => (
+                <div key={index} className="mb-3 p-2 bg-white rounded shadow-sm">
+                  <strong className="text-blue-600">{response.type}:</strong> {response.content}
+                  <br />
+                  <small className="text-gray-500">{response.timestamp}</small>
+                </div>
+              ))
+            )}
           </div>
         </div>
-      )}
+        
+        <div>
+          <h3 className="text-xl font-semibold mb-3">Debug Log:</h3>
+          <div className="border border-gray-300 p-4 h-64 overflow-y-auto bg-gray-900 text-green-400 rounded font-mono text-sm">
+            {debugLogs.length === 0 ? (
+              <p className="text-gray-500 italic">No logs yet...</p>
+            ) : (
+              debugLogs.map((log, index) => (
+                <div key={index} className="mb-1">{log}</div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
-);     
-}
+  );
+};
 
-
-export default AudioTest;
+export default AudioRecorder;

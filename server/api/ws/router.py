@@ -47,7 +47,11 @@ async def websocket_endpoint(
     audio_response_task = None
     
     try:
-        setup_msg = await websocket.receive_text()
+        try:
+            setup_msg = await websocket.receive_text()
+        except Exception as e:
+            logger.warning(f"[WebSocket] Client {client_id} disconnected before sending setup: {e}")
+            return 
         try:
             setup_data = json.loads(setup_msg)
         except json.JSONDecodeError:
@@ -93,8 +97,10 @@ async def websocket_endpoint(
                         await audio_service.init_client(client_id, websocket)
                         print(f"🎵 [SETUP] AUDIO session initialized for {client_id}")
                         
-                        # Verify session was created
-                        if client_id in audio_service.gemini_sessions and audio_service.gemini_sessions[client_id]:
+                        # Verify session was created - FIXED: Check correct structure
+                        if (client_id in audio_service.sessions and 
+                            audio_service.sessions[client_id] and
+                            'session' in audio_service.sessions[client_id]):
                             print(f"✅ [SETUP] AUDIO session verified for {client_id}")
                         else:
                             print(f"⚠️ [SETUP] AUDIO session not found after initialization for {client_id}")
@@ -196,28 +202,42 @@ async def websocket_endpoint(
             elif message_type == "audio_chunk":
                 print(f"🎵 [WS] Received audio chunk for {client_id}")
                 audio_data = base64.b64decode(data.get("data", ""))
-                if client_id in audio_service.audio_buffers:
-                    audio_service.audio_buffers[client_id].append(audio_data)
-                    print(f"🎵 [WS] Audio chunk buffered for {client_id}, buffer size: {len(audio_service.audio_buffers[client_id])}")
-                else:
-                    print(f"⚠️ [WS] No audio buffer found for {client_id}")
-                    
+                
+                # REMOVED: audio_buffers reference (not in AudioService)
+                # Just send directly to audio service
                 await audio_service.send_audio_chunk(client_id, audio_data)
             
             elif message_type == "start_recording":
                 print(f"🎙️ [WS] Start recording for {client_id}")
-                await audio_service.start_recording(client_id)
+                success = await audio_service.start_recording(client_id)
+                if not success:
+                    await websocket.send_json({"error": "Failed to start recording"})
             
             elif message_type == "stop_recording":
                 print(f"🛑 [WS] Stop recording for {client_id}")
-                await audio_service.stop_recording(client_id)
+                success = await audio_service.stop_recording(client_id)
+                if not success:
+                    await websocket.send_json({"error": "Failed to stop recording"})
             
             elif message_type == "text_message":
                 text_content = data.get("content", "")
-                if text_content and client_id in audio_service.gemini_sessions:
-                    session = audio_service.gemini_sessions[client_id]
-                    if session:
-                        await session.send(text_content)
+                if text_content:
+                    # FIXED: Use correct session structure
+                    session_data = audio_service.sessions.get(client_id)
+                    if session_data and 'session' in session_data:
+                        session = session_data['session']
+                        try:
+                            # Send text to audio session - use proper method
+                            if hasattr(session, 'send_text'):
+                                await session.send_text(text_content)
+                            elif hasattr(session, 'send'):
+                                await session.send(text_content)
+                            else:
+                                # Fallback: send as realtime input
+                                await session.send_realtime_input(text=text_content)
+                        except Exception as e:
+                            logger.error(f"Failed to send text to audio session for {client_id}: {e}")
+                            await websocket.send_json({"error": "Failed to send text message"})
                     else:
                         logger.error(f"[WebSocket] No audio session available for {client_id}")
                         await websocket.send_json({"error": "Audio session not available"})
