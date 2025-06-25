@@ -14,31 +14,34 @@ logger = logging.getLogger(__name__)
 
 class AudioService:
     def __init__(self, api_key, model="gemini-2.0-flash-live-001"):
-        logger.info(f"Initializing AudioService with model: {model}")
-        
-        self.client = genai.Client(api_key=api_key)
-        self.model = model
-        self.sessions = {}  # Combined session storage
-        self.websockets = {}
-        self.states = {}  # session states
-        self.retry_counts = {}
-        # ADDED: Audio buffers that WebSocket endpoint expects
-        self.audio_buffers = {}
-        # ADDED: Emotion service placeholder (needed by WebSocket)
-        self.emotion_service = None  # Initialize this if you have an emotion service
-        
-        logger.info("AudioService initialized")
+            logger.info(f"Initializing AudioService with model: {model}")
+            
+            self.client = genai.Client(api_key=api_key)
+            self.model = model
+            self.sessions = {}  # Combined session storage
+            self.websockets = {}
+            self.states = {}  # session states
+            self.retry_counts = {}
+            self.audio_buffers = {}
+            self.client_models = {}  # 🔥 Add this line to track models per client
+            self.emotion_service = None  # Initialize this if you have an emotion service
+            
+            logger.info("AudioService initialized")
     
-    async def init_client(self, client_id: str, websocket):
+    async def init_client(self, client_id: str, websocket, model: str = None):
         """Initialize client with retry logic"""
-        logger.info(f"Initializing client: {client_id}")
+        logger.info(f"Initializing client: {client_id} with model: {model}")
         
         self.websockets[client_id] = websocket
         self.states[client_id] = 'idle'
         self.retry_counts[client_id] = 0
-        # ADDED: Initialize audio buffer
         self.audio_buffers[client_id] = []
-        
+
+        if model:
+            self.client_models[client_id] = model
+        else:
+            self.client_models[client_id] = "gemini-2.0-flash-live-001"  # fallback
+
         # Initialize with retry
         for attempt in range(3):
             try:
@@ -50,30 +53,30 @@ class AudioService:
                 if attempt == 2:
                     raise
                 await asyncio.sleep(1)
-    
+
     async def _create_session(self, client_id: str):
         """Create Gemini session and start response handler"""
         system_instruction = """You are a compassionate mental health support assistant. 
         Provide empathetic, supportive responses. Keep responses concise for voice interaction.
         Encourage professional help when appropriate."""
 
-        # FIXED: Simplified configuration for better compatibility
+        model_to_use = self.client_models.get(client_id, "gemini-2.0-flash-live-001")
+
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],  # Only audio for now to avoid conflicts
            system_instruction=types.Content(
                 parts=[types.Part(text=system_instruction)]
             )
         )
-        
+
         try:
-            session_cm = self.client.aio.live.connect(model=self.model, config=config)
+            session_cm = self.client.aio.live.connect(model=model_to_use, config=config)
             session = await asyncio.wait_for(session_cm.__aenter__(), timeout=30.0)
-            
+
             self.sessions[client_id] = {'session': session, 'context': session_cm}
-            
-            # Start response handler
+
             asyncio.create_task(self._handle_responses(client_id))
-            
+
         except Exception as e:
             logger.error(f"Session creation failed for {client_id}: {e}")
             # Try fallback model if the primary fails
@@ -228,18 +231,22 @@ class AudioService:
     async def _handle_session_error(self, client_id: str, error_msg: str):
         """Handle session errors with recovery"""
         self.retry_counts[client_id] = self.retry_counts.get(client_id, 0) + 1
-        
+
+        # Ensure error_msg is a string to prevent NoneType errors
+        error_str = str(error_msg) if error_msg is not None else ""
+
         # Check for connection errors
-        if any(indicator in error_msg.lower() for indicator in 
-               ["1007", "invalid frame payload", "websocket", "connection closed"]):
-            
+        if any(indicator in error_str.lower() for indicator in 
+            ["1007", "invalid frame payload", "websocket", "connection closed"]):
+
             if self.retry_counts[client_id] <= 3:
                 logger.warning(f"Connection error for {client_id}, attempting recovery")
                 await self._recover_session(client_id)
             else:
                 await self._send_error(client_id, "Connection failed. Please refresh and try again.")
         else:
-            await self._send_error(client_id, f"Session error: {error_msg}")
+            await self._send_error(client_id, f"Session error: {error_str}")
+
     
     async def _recover_session(self, client_id: str):
         """Recover failed session"""

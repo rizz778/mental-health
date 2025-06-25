@@ -89,7 +89,7 @@ async def websocket_endpoint(
                     logger.info(f"Starting AUDIO session initialization for {client_id}")
                     
                     try:
-                        await audio_service.init_client(client_id, websocket)
+                        await audio_service.init_client(client_id, websocket, model=model)
                         print(f"🎵 [SETUP] AUDIO session initialized for {client_id}")
                         
                         # FIX: Only check for presence and non-None session object
