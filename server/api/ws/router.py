@@ -32,6 +32,8 @@ def get_config_from_setup(setup_data, default_model):
     return model, gemini_config
 
 
+# ... (imports and setup unchanged)
+
 @router.websocket("/")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -42,7 +44,6 @@ async def websocket_endpoint(
     await websocket.accept()
     client_id = f"client_{id(websocket)}"
    
-    # Tasks to track running operations
     text_receive_task = None
     audio_response_task = None
     
@@ -67,11 +68,8 @@ async def websocket_endpoint(
                 model, gemini_config = get_config_from_setup(setup_data["setup"], gemini_service.model)
                 response_modalities = gemini_config.get("responseModalities", ["TEXT"])
                 
-                # Initialize session based on modalities
                 if "TEXT" in response_modalities:
-                    # Initialize text-based session
                     session, session_cm = await gemini_service.start_session(gemini_config)
-                    
                     active_sessions[client_id] = {
                         "session": session,
                         "session_cm": session_cm,
@@ -81,15 +79,12 @@ async def websocket_endpoint(
                         "initialized": True,
                         "modalities": response_modalities
                     }
-                    
-                    # Start text response handler
                     text_receive_task = asyncio.create_task(
                         gemini_service.receive_responses(session, websocket, client_id, active_sessions)
                     )
                     logger.info(f"[WebSocket] Started TEXT modality task for {client_id}")
                 
                 if "AUDIO" in response_modalities:
-                    # Initialize audio session (separate from text session)
                     print(f"🎵 [SETUP] Initializing AUDIO session for {client_id}")
                     logger.info(f"Starting AUDIO session initialization for {client_id}")
                     
@@ -97,10 +92,8 @@ async def websocket_endpoint(
                         await audio_service.init_client(client_id, websocket)
                         print(f"🎵 [SETUP] AUDIO session initialized for {client_id}")
                         
-                        # Verify session was created - FIXED: Check correct structure
-                        if (client_id in audio_service.sessions and 
-                            audio_service.sessions[client_id] and
-                            'session' in audio_service.sessions[client_id]):
+                        # FIX: Only check for presence and non-None session object
+                        if client_id in audio_service.sessions and audio_service.sessions[client_id]:
                             print(f"✅ [SETUP] AUDIO session verified for {client_id}")
                         else:
                             print(f"⚠️ [SETUP] AUDIO session not found after initialization for {client_id}")
@@ -110,7 +103,6 @@ async def websocket_endpoint(
                         logger.error(f"Audio session initialization failed for {client_id}: {audio_error}")
                         raise audio_error
                     
-                    # If no text session was created, create a minimal session entry
                     if client_id not in active_sessions:
                         active_sessions[client_id] = {
                             "session": None,
@@ -122,7 +114,6 @@ async def websocket_endpoint(
                             "modalities": response_modalities
                         }
                     else:
-                        # Update existing session with audio modality
                         active_sessions[client_id]["modalities"] = response_modalities
                     
                     logger.info(f"[WebSocket] Initialized AUDIO modality session for {client_id}")
@@ -137,7 +128,6 @@ async def websocket_endpoint(
             await websocket.send_json({"error": "First message must be setup"})
             return
         
-        # Main message handling loop
         while True:
             msg = await websocket.receive_text()
             logger.info(f"[WebSocket] Received message: {msg}")
@@ -154,14 +144,11 @@ async def websocket_endpoint(
             
             message_type = data.get("type")
             
-            # Handle text content for TEXT modality
             if "clientContent" in data:
                 user_turns = data["clientContent"].get("turns", [])
                 turn_complete = data["clientContent"].get("turnComplete", True)
-                
                 if user_turns and "parts" in user_turns[0] and user_turns[0]["parts"]:
                     try:
-                        # Safely access the session with validation
                         if (client_id in active_sessions and 
                             isinstance(active_sessions[client_id], dict) and 
                             active_sessions[client_id].get("initialized", False) and
@@ -180,7 +167,6 @@ async def websocket_endpoint(
                         logger.error(f"[Gemini] Error sending turns: {e}")
                         await websocket.send_json({"error": f"Failed to send content: {str(e)}"})
             
-            # Handle emotion analysis from video frames
             elif "frame" in data:
                 try:
                     frame_b64 = data["frame"]
@@ -198,13 +184,9 @@ async def websocket_endpoint(
                     logger.error(f"[Emotion] Error processing frame: {e}")
                     await websocket.send_json({"error": "Emotion processing failed"})
             
-            # Handle audio messages for AUDIO modality
             elif message_type == "audio_chunk":
                 print(f"🎵 [WS] Received audio chunk for {client_id}")
                 audio_data = base64.b64decode(data.get("data", ""))
-                
-                # REMOVED: audio_buffers reference (not in AudioService)
-                # Just send directly to audio service
                 await audio_service.send_audio_chunk(client_id, audio_data)
             
             elif message_type == "start_recording":
@@ -222,18 +204,16 @@ async def websocket_endpoint(
             elif message_type == "text_message":
                 text_content = data.get("content", "")
                 if text_content:
-                    # FIXED: Use correct session structure
-                    session_data = audio_service.sessions.get(client_id)
-                    if session_data and 'session' in session_data:
-                        session = session_data['session']
+                    # FIX: Use the session object directly
+                    session = audio_service.sessions.get(client_id)
+                    if session:
                         try:
-                            # Send text to audio session - use proper method
+                            # Send text to audio session using appropriate method
                             if hasattr(session, 'send_text'):
                                 await session.send_text(text_content)
                             elif hasattr(session, 'send'):
                                 await session.send(text_content)
                             else:
-                                # Fallback: send as realtime input
                                 await session.send_realtime_input(text=text_content)
                         except Exception as e:
                             logger.error(f"Failed to send text to audio session for {client_id}: {e}")
@@ -249,7 +229,6 @@ async def websocket_endpoint(
         logger.error(f"Error handling client {client_id}: {e}")
     
     finally:
-        # Cancel running tasks
         if text_receive_task and not text_receive_task.done():
             text_receive_task.cancel()
             try:
@@ -268,7 +247,6 @@ async def websocket_endpoint(
             except Exception as task_error:
                 logger.error(f"Error cancelling audio response task for {client_id}: {task_error}")
         
-        # Clean up the session
         if client_id in active_sessions:
             try:
                 session_data = active_sessions[client_id]
@@ -279,10 +257,7 @@ async def websocket_endpoint(
                     logger.info(f"[WebSocket] No session context manager to clean up for {client_id}")
             except Exception as cleanup_error:
                 logger.error(f"Error cleaning up session for {client_id}: {cleanup_error}")
-            
-            # Remove from active sessions
             del active_sessions[client_id]
         
-        # Clean up audio service
         audio_service.cleanup_client(client_id)
         logger.info(f"[WebSocket] Cleanup completed for {client_id}")

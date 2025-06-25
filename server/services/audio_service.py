@@ -53,14 +53,16 @@ class AudioService:
     
     async def _create_session(self, client_id: str):
         """Create Gemini session and start response handler"""
-        system_prompt = """You are a compassionate mental health support assistant. 
+        system_instruction = """You are a compassionate mental health support assistant. 
         Provide empathetic, supportive responses. Keep responses concise for voice interaction.
         Encourage professional help when appropriate."""
 
         # FIXED: Simplified configuration for better compatibility
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],  # Only audio for now to avoid conflicts
-            system_instruction=system_prompt
+           system_instruction=types.Content(
+                parts=[types.Part(text=system_instruction)]
+            )
         )
         
         try:
@@ -80,7 +82,7 @@ class AudioService:
                 fallback_model = "gemini-2.0-flash-live-001"
                 config = types.LiveConnectConfig(
                     response_modalities=["AUDIO"],
-                    system_instruction=system_prompt
+                    system_instruction=system_instruction
                 )
                 session_cm = self.client.aio.live.connect(model=fallback_model, config=config)
                 session = await asyncio.wait_for(session_cm.__aenter__(), timeout=30.0)
@@ -123,49 +125,79 @@ class AudioService:
         websocket = self.websockets.get(client_id)
         if not websocket:
             return
-            
-        # FIXED: Better response structure handling
-        try:
-            # Check for server content
-            if hasattr(response, 'server_content') and response.server_content:
-                server_content = response.server_content
-                
-                # Handle model turn with parts
-                if hasattr(server_content, 'model_turn') and server_content.model_turn:
-                    model_turn = server_content.model_turn
-                    
-                    if hasattr(model_turn, 'parts') and model_turn.parts:
-                        for part in model_turn.parts:
-                            # Handle text content
-                            if hasattr(part, 'text') and part.text:
-                                await websocket.send_json({
-                                    "type": "text_response",
-                                    "content": part.text.strip(),
-                                    "timestamp": datetime.now().isoformat()
-                                })
-                            
-                            # Handle inline audio data
-                            if hasattr(part, 'inline_data') and part.inline_data:
-                                inline_data = part.inline_data
-                                if hasattr(inline_data, 'mime_type') and inline_data.mime_type.startswith('audio/'):
-                                    if hasattr(inline_data, 'data') and inline_data.data:
-                                        await self._send_audio_response(client_id, inline_data.data)
-                
-                # Handle turn completion
-                if hasattr(server_content, 'turn_complete') and server_content.turn_complete:
-                    self.states[client_id] = 'ready'
+        try:    
+            # FIXED: Better response structure handling
+            if hasattr(response, 'text') and response.text is not None:
                     await websocket.send_json({
-                        "type": "turn_complete",
+                        "type": "text_response",
+                        "content": response.text,
                         "timestamp": datetime.now().isoformat()
                     })
-            
-            # Handle direct audio data (alternative structure)
-            elif hasattr(response, 'data') and response.data:
-                await self._send_audio_response(client_id, response.data)
+                
+                # Handle audio data directly from response
+            if hasattr(response, 'data') and response.data is not None:
+                    await self._send_audio_response(client_id, response.data)
+                
+                # Handle server content with proper structure
+            if hasattr(response, 'server_content') and response.server_content:
+                    server_content = response.server_content
+                    
+                    # Handle model turn
+                    if hasattr(server_content, 'model_turn') and server_content.model_turn:
+                        model_turn = server_content.model_turn
+                        
+                        if hasattr(model_turn, 'parts') and model_turn.parts:
+                            for part in model_turn.parts:
+                                # Handle text in parts
+                                if hasattr(part, 'text') and part.text:
+                                    await websocket.send_json({
+                                        "type": "text_response",
+                                        "content": part.text,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                                
+                                # Handle inline audio data
+                                if hasattr(part, 'inline_data') and part.inline_data:
+                                    inline_data = part.inline_data
+                                    if hasattr(inline_data, 'data') and inline_data.data:
+                                        await self._send_audio_response(client_id, inline_data.data)
+                    
+                    # Handle turn completion
+                    if hasattr(server_content, 'turn_complete') and server_content.turn_complete:
+                        self.states[client_id] = 'ready'
+                        await websocket.send_json({
+                            "type": "turn_complete",
+                            "timestamp": datetime.now().isoformat()
+                        })
+                    
+                    # Handle generation complete
+                    if hasattr(server_content, 'generation_complete') and server_content.generation_complete:
+                        self.states[client_id] = 'ready'
+                        await websocket.send_json({
+                            "type": "generation_complete",
+                            "timestamp": datetime.now().isoformat()
+                        })
+                    
+                    # Handle interruptions
+                    if hasattr(server_content, 'interrupted') and server_content.interrupted:
+                        await websocket.send_json({
+                            "type": "interrupted",
+                            "timestamp": datetime.now().isoformat()
+                        })
+                
+                # Handle usage metadata
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                    usage = response.usage_metadata
+                    await websocket.send_json({
+                        "type": "usage_update",
+                        "total_tokens": usage.total_token_count,
+                        "timestamp": datetime.now().isoformat()
+                    })
                 
         except Exception as e:
             logger.error(f"Error processing response for {client_id}: {e}")
             raise e
+    
     
     async def _send_audio_response(self, client_id: str, audio_data: bytes):
         """Send audio response to client"""
@@ -246,27 +278,11 @@ class AudioService:
                 mime_type="audio/pcm;rate=16000"
             )
             
-            # Create client content with audio
-            client_content = types.LiveClientContent()
-            
-            # FIXED: Use the correct method to send audio
-            try:
-                # Method 1: Direct send with LiveClientContent
-                if hasattr(client_content, 'realtime_input'):
-                    client_content.realtime_input = types.RealtimeInput(media_chunks=[audio_blob])
-                    await session.send_realtime_input(client_content)
-                else:
-                    # Method 2: Use send method with audio parameter
-                    await session.send_realtime_input(audio=audio_blob)
+            # Send using the correct API method
+            await session.send_realtime_input(audio=audio_blob)
+            logger.debug(f"Audio chunk sent for {client_id}: {len(audio_data)} bytes")
                     
-            except AttributeError as ae:
-                # Method 3: Try alternative audio sending approach
-                logger.debug(f"Trying alternative audio send method for {client_id}: {ae}")
-                # Create a turn with audio content
-                turn_content = types.Content(parts=[types.Part(inline_data=audio_blob)])
-                await session.send_realtime_input(turn_content)
-                
-            logger.debug(f"Audio chunk sent for {client_id}")
+            
             
         except Exception as e:
             logger.error(f"Failed to send audio for {client_id}: {e}")
@@ -305,22 +321,16 @@ class AudioService:
             self.states[client_id] = 'processing'
             session = session_data['session']
             
-            # FIXED: Proper turn completion for Live API
-            try:
-                # Create turn complete signal
-                client_content = types.LiveClientContent()
-                
-                # Method 1: Set turn_complete flag
-                if hasattr(client_content, 'turn_complete'):
-                    client_content.turn_complete = True
-                    await session.send(client_content)
-                else:
-                    # Method 2: Send empty content to signal end
-                    await session.send(types.LiveClientContent())
-                    
-            except Exception as e:
-                logger.debug(f"Turn completion signal failed for {client_id}: {e}")
-                # This might be expected behavior for some API versions
+            await session.send_realtime_input(audio_stream_end=True)
+            
+            # If using manual VAD, also send activity end:
+            # await session.send_realtime_input(activity_end=types.ActivityEnd())
+            
+            await websocket.send_json({
+                "type": "recording_stopped",
+                "timestamp": datetime.now().isoformat()
+            })
+            
             
             self.states[client_id] = 'idle'
             await websocket.send_json({

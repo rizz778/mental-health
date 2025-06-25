@@ -157,7 +157,7 @@ const AudioRecorder = () => {
         // Send setup message
         const setupMessage = {
           setup: {
-            model: "gemini-2.5-flash-preview-native-audio-dialog",
+            model: "gemini-2.0-flash-live-001",
             generationConfig: {
               responseModalities: ["AUDIO"]
             },
