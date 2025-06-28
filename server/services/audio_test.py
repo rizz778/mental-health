@@ -73,7 +73,7 @@ class GeminiLiveClient:
             "setup": {
                 "model": config.get("model", "models/gemini-2.5-flash-preview-native-audio-dialog"),
                 "generationConfig": {  # Fixed: was "generation_config"
-                    "responseModalities": config.get("response_modalities", ["AUDIO"]),  # Fixed: was "response_modalities"
+                    "responseModalities": config.get("response_modalities", ["AUDIO", "TEXT"]),  # Fixed: was "response_modalities"
                     "speechConfig": {  # Fixed: was "speech_config"
                         "voiceConfig": {  # Fixed: was "voice_config"
                             "prebuiltVoiceConfig": {  # Fixed: was "prebuilt_voice_config"
@@ -203,6 +203,7 @@ class ConnectionManager:
     async def send_message(self, websocket: WebSocket, message: dict):
         """Send message to WebSocket client"""
         try:
+            print(f"➡️ Sending to client: {json.dumps(message, indent=2)}")  # <-- Add this line
             await websocket.send_text(json.dumps(message))
         except Exception as e:
             logger.error(f"Error sending message to client: {e}")
@@ -247,6 +248,7 @@ class ConnectionManager:
                             inline_data = part["inlineData"]
                             # Output audio from Gemini is PCM 24kHz
                             mime_type = inline_data.get("mimeType", "audio/pcm")
+                            print("🔊 Sending Gemini audio to client")
                             await self.send_message(websocket, {
                                     "type": "audio",
                                     "audio_data": inline_data.get("data", ""),
@@ -255,6 +257,7 @@ class ConnectionManager:
                         
                         # Handle text response
                         elif "text" in part:
+                            print("💬 Sending Gemini transcript to client")
                             await self.send_message(websocket, {
                                 "type": "transcript",
                                 "text": part["text"]
@@ -279,6 +282,8 @@ class ConnectionManager:
             elif "realtimeInput" in message:
                 realtime_input = message["realtimeInput"]
                 if "userTranscript" in realtime_input:
+                    print("📝 Sending user transcript to client")
+                    print(f"📝 User transcript: {realtime_input['userTranscript']}")  # <-- Add this line
                     await self.send_message(websocket, {
                         "type": "user_transcript",
                         "text": realtime_input["userTranscript"]
@@ -319,7 +324,8 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for client connections"""
     
     # Get API key from environment or query parameter
-    api_key = ''
+    api_key = 'ya29.c.c0ASRK0Gb_5TqY-GPfZ6-AwAbcNEv1bc4AnhdCc9oBNEzTU9lE7SYtnpIjSVH6PsudKoPIFrw_mhMoyrYBWBfgA7io2hTVTS15ZvHNtvSAoeMEiqYw3ByjKTuxf0gMwvdDCBkZBTHKer2Rk0vazj1SJnsfOlpvAnTdZvoTPgMf9zoZWWh8sM8V7YqAOR1req_1i-mOcZE9xa5PdHI8ycNdRLHHl1taz3GCH2UUjj3M5RcTZNg6CkqG58qbloffCEcD7NB-PolcwWFag5gM6lv4IwJqMUaeq5yRl6Md3oTb6IJmzPsthUfxRTvMA9vDsdb1zRiBwoxBFSVUhTOXsU1kfXVFX6oXSN9PqS1JfMcMeHFGrGEbWmw4Cgn3-QL387Dw7q8aeQ9361rVVIai1_dkR9i1ld9BO8140dnxZ5MtBrlgtvJd4vBcfQz8QbyWsMl3h45x3iqOxqaRknl6WkI76_hRlllS1sF9rtlM6fq_m8s3Qkozcrn0hF66ItIU15sv3kQQdZWFsoBF7svfo5lWulqpsxmn0pi_oXhu9y6yihlzWi502ZSJZJaruqs6ovQhU8k2vgpQaxyeQUjZgBfaie57_y1XdU7xuYYsBr3mMfUSYh2q2QjzQXF6y-tOY1vp7wsUuQY74v9-VfpVFvX7ks7sW4RzWXjn1V_9Bh5bUngZt0SJQM7lnIdvSqfdhw9oZUhRVcne0VYlYBwkfIej0V_a31imFFvW8jZbyuUZSa5Vp4Q9uwjmSQ0eS7ytplyX2t-edfMkWinyW3Wkl-f0uhtrVg4Sh1uXmxenBxR1zz33YR-esZymF9mp_-5RbW67ReatRk3jbchlS_rhyJqm8crJteZjef9a6w5kl3MhB6vh2Syrgwmikj5bOwjRVxxW2MIJp0ys7Yaq6FZlqooXjvaJr3YO4-zIfltkOxRuxXlMz0V9ntnsuo4rUrp-2-s395cbI_88iY8t_de6-JFQQ7a7efbqQMrMy16IMph8_Xc0_mIxsOOW_ar'
+
     if not api_key:
         await websocket.close(code=1008, reason="GEMINI_API_KEY not found")
         return
