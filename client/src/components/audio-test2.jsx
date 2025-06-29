@@ -1,6 +1,4 @@
-
-
- import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff } from 'lucide-react';
 
 const GeminiAudioChat = () => {
@@ -23,6 +21,9 @@ const GeminiAudioChat = () => {
   const currentAudioSourceRef = useRef(null);
   const recordingTimeoutRef = useRef(null);
   const audioContextReadyRef = useRef(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [emotion, setEmotion] = useState({ current: '', aggregated: '' });
 
   const addLog = useCallback((message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
@@ -336,61 +337,121 @@ const GeminiAudioChat = () => {
     }
   };
 
+  // --- Emotion capture logic (from emo_test.jsx) ---
+  useEffect(() => {
+    // Start webcam
+    navigator.mediaDevices
+      .getUserMedia({ video: true })
+      .then((stream) => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        const interval = setInterval(() => {
+          const canvas = canvasRef.current;
+          const video = videoRef.current;
+          if (canvas && video) {
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            // Here you would run your emotion detection model on the frame
+            // For demo, we'll just set a fake emotion
+            // Replace this with your real model inference
+            setEmotion((prev) => ({ ...prev, aggregated: 'happy' }));
+          }
+        }, 1000);
+        return () => clearInterval(interval);
+      })
+      .catch((err) => console.error('Error accessing webcam:', err));
+  }, []);
+
+  // --- TTS to PCM using Web Audio API ---
+  const synthesizeEmotionPCM = async (emotionText) => {
+    return new Promise((resolve, reject) => {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const utter = new window.SpeechSynthesisUtterance(emotionText);
+        utter.lang = 'en-US';
+        let source;
+        let dest = audioCtx.createMediaStreamDestination();
+        utter.onstart = () => {
+          source = audioCtx.createMediaStreamSource(dest.stream);
+        };
+        utter.onend = async () => {
+          // Record the TTS output
+          const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm' });
+          let chunks = [];
+          recorder.ondataavailable = (e) => chunks.push(e.data);
+          recorder.onstop = async () => {
+            const blob = new Blob(chunks, { type: 'audio/webm' });
+            const arrayBuffer = await blob.arrayBuffer();
+            // Decode to PCM
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            const pcm = audioBuffer.getChannelData(0);
+            resolve(new Float32Array(pcm));
+          };
+          recorder.start();
+          setTimeout(() => recorder.stop(), 1000); // Record for 1s (adjust as needed)
+        };
+        window.speechSynthesis.speak(utter);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  };
+
   const stopRecording = async () => {
     if (recordingTimeoutRef.current) {
       clearTimeout(recordingTimeoutRef.current);
       recordingTimeoutRef.current = null;
     }
-    
     if (audioProcessorRef.current) {
       try {
         audioProcessorRef.current.processor.disconnect();
         audioProcessorRef.current.source.disconnect();
         audioProcessorRef.current.context.close();
-      } catch (error) {
-        // Ignore cleanup errors
-      }
+      } catch (error) {}
     }
-    
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-    
     setIsRecording(false);
-    
     if (audioChunksRef.current.length > 0) {
-      // Optimized PCM processing
       let totalSamples = 0;
-      audioChunksRef.current.forEach(chunk => {
-        totalSamples += chunk.length;
-      });
-      
+      audioChunksRef.current.forEach(chunk => { totalSamples += chunk.length; });
       const combinedPCM = new Float32Array(totalSamples);
       let offset = 0;
-      
-      audioChunksRef.current.forEach(chunk => {
-        combinedPCM.set(chunk, offset);
-        offset += chunk.length;
-      });
-      
-      const base64Data = convertPCMToBase64(combinedPCM);
-      
+      audioChunksRef.current.forEach(chunk => { combinedPCM.set(chunk, offset); offset += chunk.length; });
+      // Synthesize emotion TTS to PCM and prepend
+      const emotionText = `The user's emotion is: ${emotion.aggregated}`;
+      let ttsPCM = null;
+      try {
+        ttsPCM = await synthesizeEmotionPCM(emotionText);
+      } catch (err) {
+        addLog('TTS error, sending only user audio', 'error');
+      }
+      let finalPCM;
+      if (ttsPCM && ttsPCM.length > 0) {
+        finalPCM = new Float32Array(ttsPCM.length + combinedPCM.length);
+        finalPCM.set(ttsPCM, 0);
+        finalPCM.set(combinedPCM, ttsPCM.length);
+      } else {
+        finalPCM = combinedPCM;
+      }
+      const base64Data = convertPCMToBase64(finalPCM);
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const message = {
           type: 'audio_input',
           audio_data: base64Data,
+          emotion: emotion.aggregated,
           format: 'pcm',
           sample_rate: 16000,
           channels: 1,
           bits_per_sample: 16
         };
-        
         wsRef.current.send(JSON.stringify(message));
-        addLog(`Audio sent (${(combinedPCM.length / 16000).toFixed(2)}s)`, 'user-input');
+        addLog(`Audio sent (${(finalPCM.length / 16000).toFixed(2)}s) with emotion: ${emotion.aggregated}`, 'user-input');
       }
     }
-    
     audioChunksRef.current = [];
     audioProcessorRef.current = null;
   };
@@ -571,6 +632,9 @@ const GeminiAudioChat = () => {
         <p>• Recording automatically stops after 5 seconds</p>
         <p>• Queue shows pending audio chunks for smooth playback</p>
       </div>
+
+      <video ref={videoRef} autoPlay playsInline className="w-32 rounded shadow" style={{ display: 'none' }} />
+      <canvas ref={canvasRef} width="224" height="224" style={{ display: 'none' }} />
     </div>
   );
 };

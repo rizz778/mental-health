@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "mental-sys",
+  "private_key_id": "b8243577130364b0daa02aa5f7b84e6701e968ba",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC2t1u1Y4uLDKj8\nrcx44+Y54Js0eLoBhAFW4Bn5tyXtikgj/vOI3idhQUsxR92dWXISgUPQRUbpyLqa\nF5c8EkwBV/L1douI16AHqr7fU8GJplOX4/58cPXISt54s/SW0gUcS6QlPw/rugpB\nB6vxddrxACBkWkuyIw+YCdxkQBFOpCNe4FB14BOneGjKz9vBUHAYJj/wRe0C6C/G\nG1EgDAUKkC25mGLQL9uMxcefh5bBQu7ED1Yv/bsb8qbuOyyZ06t1RlH/2YgyjF4+\nB6wsJOmzodjMJI3+p7ZHwJ/H+IBHwMQQ/6WMqDmXXsWCxImWxFpCKyVASRnI0y0E\njGC5eP6/AgMBAAECggEAIh3YjOT6cEs73nphPI1pNpNex4xnRtMsINmVYBA3j8QL\nNlVribnZZop3jMsbcT77UsM6M1BMLmjhltYi0f+km3edkQHCihmg8u2J2E9eSuJ4\np1rV8MxyyCRap/UKDYNHmwHws1e0FFLXiU7yZxKXf/qDEdneWnO7fKsSsNFZqfIg\ntoQHM/XUi4bb9t6BItywhDYFIOMV1LKXU/IFvvLK76s38YCWhfu1SKILJnAf0UoD\n0fgj1eRFn//ukPThsiKHJuk/zia+vRSR5ZelaiVIRb1dxt44RIFy8xHlYwWvjf6+\nzZSg1/yIkg0pVFhzq6jCziKnK9VjIER4Fg/xjb8SOQKBgQDx5vAnFcM+npnvAZ3i\nv4608iMrykIbNBtZJudZExrT57fndeswpleVMsnvrHE6259ajwY5Id8d/GZogpq+\nbSsSKZqH4sDEHEErWH+f2iSRFH+2XiHHhSwzszdosnJsoGUxcPxcxHKLNsBEguT7\n2T7dNM7tusuVIYHbaf8X9hToHQKBgQDBXWVXYQ2ni/ecijyUP2mAuHZ89d+Ha5aC\nF9z37PcCmZr3MSatxMus38LnRiJ3ZfzXzPAOI29a0lHiuszUiVSJHXiP3RHNRlHq\nJ2ByNLLUB3hAgg1ruod3hgVIeG7H0yiCyBuVq/WnYLq3nIcqaLkWu93aSoEzcuEY\newZLYn8jiwKBgH0HIN8Ct4xZCzTmQAWffpH1iMosWuiWkQAORIrcfgRCguIGJ45Y\nm3II8yiGl2uVchKrU8sZv6lO+FtSDcsYv6c+i5lqULnL5L8Tmbs0U6wMzUmj84+d\nPFBoc94QRWXxrPvV6wnDm3Rq0wtWICYvjfdlQQLMhkbJL8YJTgjDbuDdAoGAZT7M\n0Eq+BotwFCQBgjINwNtVFyr6ZoK75NQv3BTUZSUeke3HbdcMOjFTcRs08sWQ9UGW\nNCDzrl9PhuL+Ww6pF745oUJEjvIR9AO4KTRUqlZa7ZPrCQw64CdpXr/IaZKztH6o\nit7mGkS4n2kzEM6Sk0e86w51xgWRvOq1qgUhwu8CgYEAyJy+qXaAYl9AjEGbNC4L\n+B203wijgDU0CIHI8tpOCMr5ypnBzSqud0iMB6bg32tgTF+R6xTtSi9NbT3HLxio\nqm0H8moBX7EXpzAE5gZyhCgw32+hVIlT7sMZIgS7wo3iE6D125D3lnbX3RHugz9K\no54l/XCt31OlKkvA+r6j6UQ=\n-----END PRIVATE KEY-----\n",
+  "client_email": "gemini-service@mental-sys.iam.gserviceaccount.com",
+  "client_id": "103084112911834868495",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/gemini-service%40mental-sys.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

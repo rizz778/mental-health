@@ -8,8 +8,6 @@ import structlog
 import os
 import logging
 import asyncio
-
-
 from datetime import datetime, date
 from core.config import settings
 from core.logging import setup_logging, get_logger
@@ -18,9 +16,8 @@ from core.handlers import app_exception_handler, validation_exception_handler, g
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from api.deps import initialize_dependencies
 from api.ws.router import router as ws_router
-from services.gemini_service import GeminiService
-# from services.emotion_service import EmotionService  # NEW IMPORT
-from services.audio_service import AudioService
+
+
 
 
 @asynccontextmanager
@@ -82,4 +79,5 @@ app.include_router(ws_router)
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
 
