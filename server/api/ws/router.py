@@ -5,11 +5,14 @@ import base64
 import numpy as np
 import cv2
 from fastapi import APIRouter, Depends, WebSocket
-from services.gemini_service import GeminiService
 from services.audio_service import AudioService
+from services.emotion_service import EmotionService
+from services.gemini_service import GeminiService
+
 from google.genai import types
 from api.deps import get_gemini_service
 from api.deps import get_audio_service
+from api.deps import get_emotion_service
 import websockets
 
 logger = logging.getLogger(__name__)
@@ -38,7 +41,8 @@ def get_config_from_setup(setup_data, default_model):
 async def websocket_endpoint(
     websocket: WebSocket,
     gemini_service: GeminiService = Depends(get_gemini_service),
-    audio_service: AudioService = Depends(get_audio_service)
+    audio_service: AudioService = Depends(get_audio_service),
+    emotion_service: EmotionService=Depends(get_emotion_service)
 ):
     active_sessions = {}
     await websocket.accept()
@@ -172,8 +176,8 @@ async def websocket_endpoint(
                     frame_b64 = data["frame"]
                     np_arr = np.frombuffer(base64.b64decode(frame_b64), np.uint8)
                     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                    current_emotion = audio_service.emotion_service.analyze_frame(frame)
-                    aggregated = audio_service.emotion_service.get_aggregated_emotion()
+                    current_emotion = emotion_service.analyze_frame(frame)
+                    aggregated = emotion_service.get_aggregated_emotion()
                     await websocket.send_json({
                         "emotion": {
                             "current": current_emotion,

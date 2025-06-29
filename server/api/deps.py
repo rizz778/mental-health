@@ -1,5 +1,6 @@
 from services.gemini_service import GeminiService
 from services.audio_service import AudioService
+from services.emotion_service import EmotionService
 from core.config import settings
 class DependencyStorage:
 
@@ -10,12 +11,14 @@ class DependencyStorage:
 
         self._gemini_service=GeminiService(api_key=api_key,model=gemini_model)
         self._audio_service=AudioService(api_key=api_key,model=gemini_model)
-
+        self._emotion_service=EmotionService()
 
     def get_gemini_service(self)->GeminiService:
         return self._gemini_service
     def get_audio_service(self)->AudioService:
         return self._audio_service
+    def get_emotion_service(self)->EmotionService:
+        return self._emotion_service
     
 async def initialize_dependencies():
     global dependency_storage
@@ -30,3 +33,8 @@ def get_audio_service()-> GeminiService:
     if dependency_storage is None:
         raise RuntimeError("Dependencies not initialized")
     return dependency_storage.get_audio_service()
+
+def get_emotion_service()-> GeminiService:
+    if dependency_storage is None:
+        raise RuntimeError("Dependencies not initialized")
+    return dependency_storage.get_emotion_service()
