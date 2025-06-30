@@ -722,7 +722,8 @@ const Test = () => {
           <span>Status: {isTyping ? "Waiting for response..." : "Ready"}</span>
           <br />
           <span>
-            Distress Score: {distressScore !== null ? distressScore : "N/A"}
+            Distress Score:{" "}
+            {distressScore !== null ? `${distressScore} / 10` : "N/A"}
           </span>
         </div>
       </div>

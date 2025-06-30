@@ -14,7 +14,7 @@ class DistressScoreService:
         conversation = "\n".join([f"User: {m['content']}" for m in messages if m['type'] == "user"])
         prompt = (
             "Given the following conversation, rate the user's psychological distress on a scale from 0 (no distress) "
-            "to 1 (extreme distress). Only return a single number between 0 and 1, with no explanation or text.\n\n"
+            "to 10 (extreme distress). Only return a single number between 0 and 10, with no explanation or text.\n\n"
             f"{conversation}\n\nDistress score:"
         )
         try:
@@ -32,10 +32,10 @@ class DistressScoreService:
             )
             logger.info(f"[DistressScoreService] Gemini response: {response.text}")
             import re
-            match = re.search(r"([01](?:\.\d+)?)", response.text)
+            match = re.search(r"\b([0-9](?:\.\d+)?|10(?:\.0+)?)\b", response.text)
             if match:
                 score = float(match.group(1))
-                score = max(0.0, min(1.0, score))
+                score = max(0.0, min(10.0, score))  # Clamp to 0-10
                 return score
             else:
                 logger.error(f"[DistressScoreService] No valid score found in Gemini response: {response.text}")
