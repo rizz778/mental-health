@@ -4,8 +4,9 @@ import google.generativeai as genai
 logger = logging.getLogger(__name__)
 
 class DistressScoreService:
-    def __init__(self, api_key, model="gemini-1.5-flash"):
-        # No genai.configure here!
+    def __init__(self, api_key, model="gemini-2.0-flash"):
+    
+        genai.configure(api_key=api_key)
         self.model_name = model
         self.model = genai.GenerativeModel(model)
         print("DISTRESS_API_KEY:", api_key)
