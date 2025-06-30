@@ -11,6 +11,42 @@ const Test = () => {
   const [showConfig, setShowConfig] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
 
+  const [emotion, setEmotion] = useState({ current: "", aggregated: "" });
+  // const emotionSocketRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    let interval;
+    navigator.mediaDevices
+      .getUserMedia({ video: true })
+      .then((stream) => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        interval = setInterval(() => {
+          const ws = wsRef.current; // <-- use main chat websocket
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          const canvas = canvasRef.current;
+          const video = videoRef.current;
+          if (canvas && video) {
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataURL = canvas.toDataURL("image/jpeg");
+            const base64 = dataURL.split(",")[1];
+            ws.send(JSON.stringify({ frame: base64 }));
+          }
+        }, 1000);
+      })
+      .catch((err) => console.error("Error accessing webcam:", err));
+
+    return () => {
+      if (interval) clearInterval(interval);
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
   // Messages and input
   const [messages, setMessages] = useState([
     {
@@ -97,6 +133,14 @@ const Test = () => {
       addSystemMessage("Session expiring, reconnecting to resume...");
     }
     // Handle serverContent from Gemini Live API
+    if (data.emotion) {
+      setEmotion(data.emotion);
+      return;
+    }
+    if (data.error) {
+      showError(data.error);
+      return;
+    }
     if (data.serverContent) {
       const modelTurn = data.serverContent.modelTurn;
       if (modelTurn && modelTurn.parts && modelTurn.parts.length > 0) {
@@ -427,6 +471,7 @@ const Test = () => {
       clientContent: {
         turns: turns,
         turnComplete: true,
+        emotion: emotion.current,
       },
     };
 
@@ -725,6 +770,27 @@ const Test = () => {
             Distress Score:{" "}
             {distressScore !== null ? `${distressScore} / 10` : "N/A"}
           </span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4 p-4">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          width={96}
+          height={96}
+          className="rounded-full border-2 border-blue-400 shadow"
+        />
+        <canvas ref={canvasRef} width={224} height={224} className="hidden" />
+        <div>
+          <div className="text-lg font-semibold">
+            Current Emotion:{" "}
+            <span className="font-bold">{emotion.current}</span>
+          </div>
+          <div className="text-sm text-gray-500">
+            Aggregated: {emotion.aggregated}
+          </div>
         </div>
       </div>
     </div>

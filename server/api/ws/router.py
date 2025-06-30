@@ -8,16 +8,28 @@ from fastapi import APIRouter, Depends, WebSocket
 from services.gemini_service import GeminiService
 from services.audio_service import AudioService
 from services.distress_service import DistressScoreService
+from services.emotion_service import EmotionService
 from google.genai import Client as GeminiClient
 from google.genai import types
 from api.deps import get_gemini_service
 from api.deps import get_audio_service
 from api.deps import get_distress_service
+from api.deps import get_emotion_service
+import pprint
 import websockets
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='', tags=["ws"])
+
+def is_valid_turn(turn):
+    return (
+        isinstance(turn, dict)
+        and "role" in turn
+        and "parts" in turn
+        and isinstance(turn["parts"], list)
+        and all(isinstance(part, dict) and "text" in part for part in turn["parts"])
+    )
 
 def get_config_from_setup(setup_data, default_model):
     print("[DEBUG] setup_data received:", setup_data)
@@ -43,7 +55,8 @@ async def websocket_endpoint(
     websocket: WebSocket,
     gemini_service: GeminiService = Depends(get_gemini_service),
     audio_service: AudioService = Depends(get_audio_service),
-    distress_service: DistressScoreService = Depends(get_distress_service)
+    distress_service: DistressScoreService = Depends(get_distress_service),
+    emotion_service: EmotionService = Depends(get_emotion_service),
 ):
     active_sessions = {}
     await websocket.accept()
@@ -149,16 +162,33 @@ async def websocket_endpoint(
             
             message_type = data.get("type")
             
+            # ...existing code...
+
             if "clientContent" in data:
                 user_turns = data["clientContent"].get("turns", [])
                 turn_complete = data["clientContent"].get("turnComplete", True)
-                if user_turns and "parts" in user_turns[0] and user_turns[0]["parts"]:
+                user_emotion = data["clientContent"].get("emotion")
+
+                # Inject emotion as a system message if present
+                if user_emotion:
+                    emotion_context = {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "text": f"[User's current emotion detected: {user_emotion}]"
+                            }
+                        ]
+                    }
+                    # Insert at the start of the turns list
+                    user_turns = [emotion_context] + user_turns
+
+                if user_turns and all(is_valid_turn(turn) for turn in user_turns):
                     try:
                         if (client_id in active_sessions and 
                             isinstance(active_sessions[client_id], dict) and 
                             active_sessions[client_id].get("initialized", False) and
                             active_sessions[client_id]["session"] is not None):
-                            
+
                             session = active_sessions[client_id]["session"]
                             await gemini_service.send_client_content(
                                 session,
@@ -186,14 +216,17 @@ async def websocket_endpoint(
                     except Exception as e:
                         logger.error(f"[Gemini] Error sending turns: {e}")
                         await websocket.send_json({"error": f"Failed to send content: {str(e)}"})
-            
+                else:
+                    logger.error(f"[Gemini] Invalid user_turns structure: {pprint.pformat(user_turns)}")
+                    await websocket.send_json({"error": "Invalid message format for Gemini"}) 
+                        
             elif "frame" in data:
                 try:
                     frame_b64 = data["frame"]
                     np_arr = np.frombuffer(base64.b64decode(frame_b64), np.uint8)
                     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                    current_emotion = audio_service.emotion_service.analyze_frame(frame)
-                    aggregated = audio_service.emotion_service.get_aggregated_emotion()
+                    current_emotion = emotion_service.analyze_frame(frame)
+                    aggregated = emotion_service.get_aggregated_emotion()
                     await websocket.send_json({
                         "emotion": {
                             "current": current_emotion,

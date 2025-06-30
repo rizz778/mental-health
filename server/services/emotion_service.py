@@ -14,7 +14,13 @@ class EmotionService:
     def analyze_frame(self, frame: np.ndarray) -> str:
         try:
             result = DeepFace.analyze(frame, actions=["emotion"], enforce_detection=False)
-            emotion = result[0]["dominant_emotion"]
+            # Handle both dict and list return types
+            if isinstance(result, dict):
+                emotion = result.get("dominant_emotion", "unknown")
+            elif isinstance(result, list) and result:
+                emotion = result[0].get("dominant_emotion", "unknown")
+            else:
+                emotion = "unknown"
             self.buffer.append(emotion)
             return emotion
         except Exception as e:
