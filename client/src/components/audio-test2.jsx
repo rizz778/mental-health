@@ -12,6 +12,11 @@ const GeminiAudioChat = () => {
   const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
   const [cameraPermission, setCameraPermission] = useState(null); // null, true, false
   const [emotionWs, setEmotionWs] = useState(null);
+  const [inputTranscript, setInputTranscript] = useState('');
+  const [outputTranscript, setOutputTranscript] = useState('');
+  // Accumulators for current turn (use refs for reliability)
+  const currentInputTranscriptRef = useRef('');
+  const currentOutputTranscriptRef = useRef('');
 
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -85,21 +90,22 @@ const GeminiAudioChat = () => {
   };
 
   const playAudioChunk = async (audioData, mimeType) => {
+    console.log('[playAudioChunk] called', { audioDataLength: audioData ? audioData.length : 0, mimeType, isMuted });
     if (!audioContextRef.current || isMuted) {
+      console.log('[playAudioChunk] Skipping playback: audioContextRef.current missing or muted');
       isPlayingRef.current = false;
       updateAudioQueueState();
       playNextAudio(); // Continue queue without delay
       return;
     }
-    
     try {
       // Quick context resume if needed
       if (audioContextRef.current.state === 'suspended') {
+        console.log('[playAudioChunk] AudioContext suspended, resuming...');
         await audioContextRef.current.resume();
       }
-
+      console.log('[playAudioChunk] AudioContext state:', audioContextRef.current.state);
       let audioBuffer;
-      
       if (isPCMFormat(mimeType)) {
         // Optimized PCM processing
         const binaryString = atob(audioData);
@@ -107,18 +113,15 @@ const GeminiAudioChat = () => {
         for (let i = 0; i < binaryString.length; i++) {
           uint8Array[i] = binaryString.charCodeAt(i);
         }
-        
         const int16Array = new Int16Array(uint8Array.buffer);
         const sampleCount = int16Array.length;
         const sampleRate = 24000;
-        
         audioBuffer = audioContextRef.current.createBuffer(1, sampleCount, sampleRate);
         const channelData = audioBuffer.getChannelData(0);
-        
-        // Optimized conversion
         for (let i = 0; i < int16Array.length; i++) {
           channelData[i] = int16Array[i] / 32768.0;
         }
+        console.log('[playAudioChunk] PCM buffer created', { sampleCount, sampleRate });
       } else {
         // Standard audio decoding
         const binaryString = atob(audioData);
@@ -126,33 +129,29 @@ const GeminiAudioChat = () => {
         for (let i = 0; i < binaryString.length; i++) {
           arrayBuffer[i] = binaryString.charCodeAt(i);
         }
-        
         audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer.buffer);
+        console.log('[playAudioChunk] Decoded audioBuffer', { duration: audioBuffer.duration });
       }
-      
       // Create source with minimal overhead
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioContextRef.current.destination);
-      
       currentAudioSourceRef.current = source;
-      
-      // Streamlined end handler
       source.onended = () => {
+        console.log('[playAudioChunk] Playback ended');
         isPlayingRef.current = false;
         currentAudioSourceRef.current = null;
         updateAudioQueueState();
         playNextAudio(); // Continue immediately
       };
-      
       // Start playback
       isPlayingRef.current = true;
       updateAudioQueueState();
+      console.log('[playAudioChunk] Starting playback');
       source.start(0);
-      
       addLog(`Playing audio (${audioBuffer.duration.toFixed(2)}s)`, 'success');
-      
     } catch (error) {
+      console.error('[playAudioChunk] Audio error:', error);
       addLog(`Audio error: ${error.message}`, 'error');
       isPlayingRef.current = false;
       currentAudioSourceRef.current = null;
@@ -230,31 +229,73 @@ const GeminiAudioChat = () => {
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          
+          console.log('[WebSocket message]', data); // Log all incoming messages
           switch (data.type) {
             case 'audio':
               if (data.audio_data && !isMuted) {
                 queueAudio(data.audio_data, data.mime_type || 'audio/pcm');
               }
               break;
-              
             case 'transcript':
+              console.log('[transcript] Gemini:', data.text);
               addLog(`Gemini: ${data.text}`, 'ai-response');
               break;
-              
             case 'user_transcript':
+              console.log('[user_transcript] You:', data.text);
               addLog(`You: ${data.text}`, 'user-input');
               break;
-              
+            case 'input_transcription':
+              // Accumulate input transcription chunks
+              currentInputTranscriptRef.current += (data.text || '');
+              console.log('[input_transcription chunk]', data.text, '| Accumulated:', currentInputTranscriptRef.current);
+              // If this is the last chunk (data.final or data.is_final), finalize
+              if (data.final || data.is_final) {
+                setInputTranscript(currentInputTranscriptRef.current);
+                analyzeDistressScore(currentInputTranscriptRef.current); // Analyze in parallel
+                currentInputTranscriptRef.current = '';
+                console.log('[input_transcription] Finalized:', inputTranscript);
+              }
+              break;
+            case 'output_transcription':
+              // Accumulate output transcription chunks
+              currentOutputTranscriptRef.current += (data.text || '');
+              console.log('[output_transcription chunk]', data.text, '| Accumulated:', currentOutputTranscriptRef.current);
+              // If this is the last chunk (data.final or data.is_final), finalize
+              if (data.final || data.is_final) {
+                setOutputTranscript(currentOutputTranscriptRef.current);
+                currentOutputTranscriptRef.current = '';
+                console.log('[output_transcription] Finalized:', outputTranscript);
+              }
+              break;
+            case 'info':
+              console.log('[info]', data.message);
+              addLog(data.message, 'info');
+              break;
+            case 'turnComplete':
+              // On turnComplete, finalize any remaining accumulated transcripts
+              if (currentInputTranscriptRef.current) {
+                setInputTranscript(currentInputTranscriptRef.current);
+                analyzeDistressScore(currentInputTranscriptRef.current); // Analyze in parallel
+                currentInputTranscriptRef.current = '';
+                console.log('[turnComplete] Finalizing input transcript:', currentInputTranscriptRef.current);
+              }
+              if (currentOutputTranscriptRef.current) {
+                setOutputTranscript(currentOutputTranscriptRef.current);
+                console.log('[turnComplete] Finalizing output transcript:', currentOutputTranscriptRef.current);
+                currentOutputTranscriptRef.current = '';
+              }
+              addLog(`[turnComplete event] Finalizing transcripts`, 'success');
+              break;
             case 'error':
+              console.error('[error]', data.message);
               addLog(`Error: ${data.message}`, 'error');
               break;
-              
-            case 'info':
-              addLog(data.message, 'info');
+            default:
+              console.log('[unhandled message type]', data);
               break;
           }
         } catch (error) {
+          console.error('[Message parsing error]', error);
           addLog(`Message parsing error: ${error.message}`, 'error');
         }
       };
@@ -290,6 +331,8 @@ const GeminiAudioChat = () => {
   };
 
   const startRecording = async () => {
+    currentInputTranscriptRef.current = '';
+    currentOutputTranscriptRef.current = '';
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
@@ -538,6 +581,25 @@ const GeminiAudioChat = () => {
     audioProcessorRef.current = null;
   };
 
+  // Analyze distress score using Gemini API (runs in parallel)
+  const analyzeDistressScore = async (inputText) => {
+    if (!inputText || inputText.trim() === '') return;
+    try {
+      addLog('Analyzing distress score...', 'info');
+      // Replace this URL with your actual Gemini text API endpoint
+      const response = await fetch('/api/distress-score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: inputText })
+      });
+      if (!response.ok) throw new Error('API error');
+      const data = await response.json();
+      addLog(`Distress score: ${data.score}`, 'warning');
+    } catch (err) {
+      addLog('Distress score analysis failed', 'error');
+    }
+  };
+
   const toggleMute = () => {
     const newMutedState = !isMuted;
     setIsMuted(newMutedState);
@@ -616,6 +678,20 @@ const GeminiAudioChat = () => {
 
   return (
     <div className="max-w-4xl mx-auto p-6 bg-white shadow-lg rounded-lg">
+      {/* Display input/output transcriptions */}
+      <div className="mb-4">
+        {inputTranscript && (
+          <div className="text-purple-700 text-sm mb-1">
+            <b>Your last input (transcribed):</b> {inputTranscript}
+          </div>
+        )}
+        {outputTranscript && (
+          <div className="text-blue-700 text-sm mb-1">
+            <b>Gemini's last output (transcribed):</b> {outputTranscript}
+          </div>
+        )}
+      </div>
+
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-800 mb-2">Gemini Audio Chat</h1>
         <div className="flex items-center gap-4 mb-4">

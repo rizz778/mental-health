@@ -26,7 +26,7 @@ def get_access_token():
 
 class GeminiAudioService:
     def __init__(self):
-        self.api_key = 'ya29.c.c0ASRK0GbJoDB4j65hSCYXb_gj0qTATzxRyMvpxS55NVBcLUws-1r9lvseqCb67Zh3tQyEmL9N3l7ci4BcVA9Py6j8VgexRSUBdBo3aPSIDNxLccHM7R7QtZgEwhnTy9NTrKYtkQ65t0s85ZnNkE4Qc-Q6KpflZ0u3UngsaAk0HHgPG0ScZcbgJjhvkDZxRo_gQ2dqXgh-1nP0LI8o9hI153_bSasHNCXdj04i03kuZ1CIHxKY8C7osBe0_dLvGHl2U6F4ZpgIAz4f75sJr7DSp_qtIq9SO3Gstnw0qHyFmp-EYwHQVrn20WFDkDUZ89fAa1C-plFZQvkQ1gFydkHPUjSc2NO16Kk6pbEUHwkciITbeyu_QF01Z6lEqUYtT389PvW7q66z8idRmtyunyhhzk6pjx3FQBm2ukUvBQu_n12bSv7YXU40yml3MfVVq8pikFUzaV-0UVMif03tsYk-hx6pbpni-upMWadMle-0paOW2coiOV0fa1r8b0Q68mS_vj-RrpZz8Y4pdIcuOWljlm59W05ji-mIvmr496sBkiSBxzOwcQi1l8BnBWs8s5ZZSz4c-lbFVQo1rgeosxZc_27Xxbn2jsyy9fSzVBzj8WwFixjiUfIkOpbnF42IqIufb10RMZ0Stwy_y8hzzkYdUJWdR_IOxoxkiekMuao3r8c6oez1qp-WefYikSQfYqp5FF1IRjsq1h21vcXzWvVOF9Sud18QVqeUeBRYOopk51g-IfFYwo2md3tyupFjpglY4UBQojSIw9wkzd76dVbI124iuxmujdtmiYWM8ynjkru6z8i5xi0BUlnVl0YOZp4bxb2mVjtiIJd6R00ga1xpjdb35unt8upp_4lSU-4j1ymmus4RxFlfVri9aou-Sh2q8kOV8inSv33uu9ryocXxJ7v3eJrfWo4oO-wfdUW8grsyYJ309vdncoQx4Yap4afVJxFtYk0_vFZgk_18O54249hp5trfevXBrxIBeYqdQ2Bo10ogynQWRBq'
+        self.api_key = 'ya29.c.c0ASRK0GYAb0TtyjeDpgd32Jvik1NUKa6BbE0hstWasWct9b3oKFE3075qYfk_8kROuTu8c6u_MtTMqsNJ2Ap74j2TBFb4nlUZu_ysarv9gikpJ62HNXybiLJAtQddU3EXWufKohk20HY4zmRW3Mb6OfUDl8T3XVEbO50o-g_eMWvzEdafGc37YDP6njpRrplOkQ6aSZYB9weSzC-leT_ez9siOk3c1w4b4hhWSMAFZC5MiD9--Zo_POjHiACX6bWu-yFq5DxxCnbsoqTktfboHTYG0BtqkOTGCpUH5zl42Z3k8VxprFwCWuKiwsSPDRWG3yHqtl0W9Cyv5JZahiT27CaOKJs-D5FU9yHZBfogVsCV7go6kKGbf-pbegL387Kk74Rk0W9OkFc-uMgcj8lxpzqgwptx1-jfWFaxX_JIh9jR1IUMSXWBawVztIdZxShe-BVoxa8-jQeo6aisXYoZZgrcx524Oi7snV0IFgalh9Qr6OQxwFBnma22xnoaynby14U4jrWf-ZmJbmUjjri_hW4ZlQ_Jl9o4r_I355spoYaM-yRcnc57dXQB8qgyOX_p7UMQ9hn9wJldqFmhSosx311g-jO4jue94e1a0hFMS7VxiBbb2xQxV3g64xnf3W7BZue9lgXukWUjo76SZbFV11i4r6ZudelRvzV2vome9Or2OWsexqc39Rl_r1Ih7aBrwihn4ftQr5hwoBQwQ6Zjs2U4co9x-_gmV2J70w5WjO1o6QmgJx_82jZ69WWyuaQng9we4WuqJu0wBrbYh-uMcSh363vtYzvc5sv4fMoOa7tItjVk-wxo16bwiyIJjz65r2tJVFasS49JV1_YSd2m3Mn38qjadp5j8YSU8Rg6gbMZR63Vc92VU8xSW27j2v6ivzl975dfhUZFa7__8h-cJy-YaYdtBVr0k_JqFUZuWnBtzqF8reyudWZhkzQ0w4zdx-Mc8tI-fFFVXnat0bJIQsjn1Ba4-7on5Y44_oFfJk9J2q3zptoS07i'
         self.websocket = None
         self.connected = False
         self.config = None
@@ -57,6 +57,8 @@ class GeminiAudioService:
                         }
                     }
                 },
+                "inputAudioTranscription": {},
+                "outputAudioTranscription": {},
                 "systemInstruction": {
                     "parts": [{ "text": "You are a helpful assistant." }]
                 },
@@ -163,6 +165,7 @@ class AudioConnectionManager:
                 await self.send_message(websocket, {"type": "info", "message": "Gemini setup complete"})
             elif "serverContent" in message:
                 content = message["serverContent"]
+                # Forward audio and transcript as before
                 if "modelTurn" in content:
                     parts = content["modelTurn"].get("parts", [])
                     for part in parts:
@@ -179,6 +182,23 @@ class AudioConnectionManager:
                                 "type": "transcript",
                                 "text": part["text"]
                             })
+                # Forward output transcription
+                if "outputTranscription" in content:
+                    await self.send_message(websocket, {
+                        "type": "output_transcription",
+                        "text": content["outputTranscription"].get("text", "")
+                    })
+                # Forward input transcription
+                if "inputTranscription" in content:
+                    await self.send_message(websocket, {
+                        "type": "input_transcription",
+                        "text": content["inputTranscription"].get("text", "")
+                    })
+                # Handle generationComplete and turnComplete
+                if content.get("generationComplete"):
+                    await self.send_message(websocket, {"type": "info", "message": "generationComplete"})
+                if content.get("turnComplete"):
+                    await self.send_message(websocket, {"type": "turnComplete"})
             elif "toolCall" in message:
                 tool_call = message["toolCall"]
                 await self.send_message(websocket, {"type": "info", "message": f"Tool call: {tool_call}"})

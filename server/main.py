@@ -16,6 +16,7 @@ from core.handlers import app_exception_handler, validation_exception_handler, g
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from api.deps import initialize_dependencies
 from api.ws.router import router as ws_router
+from api import distress_score
 
 
 
@@ -74,6 +75,7 @@ async def add_request_id(request: Request, call_next):
     return response
 
 app.include_router(ws_router)
+app.include_router(distress_score.router)
 
 
 @app.get("/health")
