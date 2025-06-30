@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const Test = () => {
   // Connection state
+
+  const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
+
   const [isConnected, setIsConnected] = useState(false);
   const [hasActiveSession, setHasActiveSession] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("Disconnected");
@@ -17,6 +20,7 @@ const Test = () => {
   const canvasRef = useRef(null);
 
   useEffect(() => {
+    if (!emotionDetectionEnabled) return;
     let interval;
     navigator.mediaDevices
       .getUserMedia({ video: true })
@@ -46,7 +50,7 @@ const Test = () => {
         videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
       }
     };
-  }, []);
+  }, [emotionDetectionEnabled]);
   // Messages and input
   const [messages, setMessages] = useState([
     {
@@ -62,7 +66,7 @@ const Test = () => {
 
   // Config
   const [systemInstruction, setSystemInstruction] = useState(
-    "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language."
+    "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
   );
   const [wsUrl, setWsUrl] = useState("ws://localhost:8000");
 
@@ -431,6 +435,7 @@ const Test = () => {
       clientContent: {
         turns: turns,
         turnComplete: true,
+        emotion: emotion.current,
       },
     };
 
@@ -774,24 +779,45 @@ const Test = () => {
       </div>
 
       <div className="flex items-center gap-4 p-4">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          width={96}
-          height={96}
-          className="rounded-full border-2 border-blue-400 shadow"
-        />
-        <canvas ref={canvasRef} width={224} height={224} className="hidden" />
-        <div>
-          <div className="text-lg font-semibold">
-            Current Emotion:{" "}
-            <span className="font-bold">{emotion.current}</span>
-          </div>
-          <div className="text-sm text-gray-500">
-            Aggregated: {emotion.aggregated}
-          </div>
-        </div>
+        <button
+          onClick={() => setEmotionDetectionEnabled((v) => !v)}
+          className={`px-4 py-2 rounded-lg font-semibold ${
+            emotionDetectionEnabled
+              ? "bg-green-500 text-white"
+              : "bg-gray-300 text-gray-700"
+          }`}
+        >
+          {emotionDetectionEnabled
+            ? "Stop Emotion Detection"
+            : "Start Emotion Detection"}
+        </button>
+        {emotionDetectionEnabled && (
+          <>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              width={96}
+              height={96}
+              className="rounded-full border-2 border-blue-400 shadow"
+            />
+            <canvas
+              ref={canvasRef}
+              width={224}
+              height={224}
+              className="hidden"
+            />
+            <div>
+              <div className="text-lg font-semibold">
+                Current Emotion:{" "}
+                <span className="font-bold">{emotion.current}</span>
+              </div>
+              <div className="text-sm text-gray-500">
+                Aggregated: {emotion.aggregated}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

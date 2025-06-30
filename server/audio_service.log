@@ -10,3 +10,11 @@
 
 2025-07-01 02:22:42,481 - WARNING - From C:\Users\Lenovo\OneDrive\Documents\Projects\EduMental\mental-health\server\venv\Lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
 
+2025-07-01 02:44:58,551 - WARNING - From C:\Users\Lenovo\OneDrive\Documents\Projects\EduMental\mental-health\server\venv\Lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+2025-07-01 02:57:20,160 - WARNING - From C:\Users\Lenovo\OneDrive\Documents\Projects\EduMental\mental-health\server\venv\Lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+2025-07-01 02:57:48,642 - WARNING - From C:\Users\Lenovo\OneDrive\Documents\Projects\EduMental\mental-health\server\venv\Lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+2025-07-01 02:58:05,324 - WARNING - From C:\Users\Lenovo\OneDrive\Documents\Projects\EduMental\mental-health\server\venv\Lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+

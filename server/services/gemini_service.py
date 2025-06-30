@@ -34,13 +34,24 @@ class GeminiService:
 
     
     async def send_client_content(self, session, turns, turn_complete=True):
-        # Send the full conversation history (multi-turn)
-        if turns:
-            print("[GeminiService] Sending to Gemini (raw dict, multi-turn):", turns, "turn_complete:", turn_complete)
-            await session.send_client_content(turns=turns, turn_complete=turn_complete)
-        else:
-            # If no turns, do nothing or raise error
-            pass
+        # Defensive: Validate structure before sending
+        if not isinstance(turns, list):
+            logger.error(f"[GeminiService] 'turns' is not a list: {turns}")
+            return
+        for i, turn in enumerate(turns):
+            if not isinstance(turn, dict) or "role" not in turn or "parts" not in turn:
+                logger.error(f"[GeminiService] Invalid turn at index {i}: {turn}")
+                return
+            if not isinstance(turn["parts"], list):
+                logger.error(f"[GeminiService] 'parts' is not a list at index {i}: {turn['parts']}")
+                return
+            for j, part in enumerate(turn["parts"]):
+                if not isinstance(part, dict) or "text" not in part:
+                    logger.error(f"[GeminiService] Invalid part at turn {i}, part {j}: {part}")
+                    return
+
+        print("[GeminiService] Sending to Gemini (raw dict, multi-turn):", turns, "turn_complete:", turn_complete)
+        await session.send_client_content(turns=turns, turn_complete=turn_complete)
 
     async def _safe_websocket_send(self, websocket, client_id, data_dict):
         """Safely send data to websocket with proper error handling"""
