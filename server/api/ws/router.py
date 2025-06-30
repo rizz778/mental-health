@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix='', tags=["ws"])
 
 def get_config_from_setup(setup_data, default_model):
+    print("[DEBUG] setup_data received:", setup_data)
     model = setup_data.get("model", default_model)
     config = setup_data.get("generationConfig", {"responseModalities": ["TEXT"]})
     system_instruction = setup_data.get("systemInstruction")
@@ -69,7 +70,7 @@ async def websocket_endpoint(
                 response_modalities = gemini_config.get("responseModalities", ["TEXT"])
                 
                 if "TEXT" in response_modalities:
-                    session, session_cm = await gemini_service.start_session(gemini_config)
+                    session, session_cm = await gemini_service.start_session(gemini_config, model=model)
                     active_sessions[client_id] = {
                         "session": session,
                         "session_cm": session_cm,

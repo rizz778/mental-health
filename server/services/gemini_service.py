@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from xml.parsers.expat import model
 from google import genai
 
 
@@ -11,7 +12,7 @@ class GeminiService:
         self.client = genai.Client(api_key=api_key)
         self.model = model
 
-    async def start_session(self, config):
+    async def start_session(self, config, model=None):
         # Enable context window compression with a sliding window
         from google.genai import types
         # If config is a dict, build a LiveConnectConfig object
@@ -26,7 +27,8 @@ class GeminiService:
             config.context_window_compression = types.ContextWindowCompressionConfig(
                 sliding_window=types.SlidingWindow()
             )
-        session_cm = self.client.aio.live.connect(model=self.model, config=config)
+        model_to_use = model or self.model
+        session_cm = self.client.aio.live.connect(model=model_to_use, config=config)
         session = await session_cm.__aenter__()
         return session, session_cm
 
@@ -51,8 +53,9 @@ class GeminiService:
                 logger.error(f"[Gemini] Invalid websocket object for client {client_id}")
                 return False
             
-            payload = json.dumps(data_dict)
-            await websocket.send(payload)
+            # payload = json.dumps(data_dict)
+            # await websocket.send(payload)
+            await websocket.send_json(data_dict)
             return True
         except Exception as e:
             logger.error(f"[Gemini] Safe websocket send failed for {client_id}: {e}")
