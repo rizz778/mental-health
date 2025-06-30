@@ -9,7 +9,10 @@ const GeminiAudioChat = () => {
   const [logs, setLogs] = useState([]);
   const [audioQueueLength, setAudioQueueLength] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  
+  const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
+  const [cameraPermission, setCameraPermission] = useState(null); // null, true, false
+  const [emotionWs, setEmotionWs] = useState(null);
+
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -23,6 +26,7 @@ const GeminiAudioChat = () => {
   const audioContextReadyRef = useRef(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const webcamStreamRef = useRef(null);
   const [emotion, setEmotion] = useState({ current: '', aggregated: '' });
 
   const addLog = useCallback((message, type = 'info') => {
@@ -204,7 +208,7 @@ const GeminiAudioChat = () => {
       // Ensure audio context is ready
       await initializeAudioContext();
       
-      const wsUrl = 'ws://localhost:8000/ws';
+      const wsUrl = 'ws://localhost:8000/audio';
       wsRef.current = new WebSocket(wsUrl);
       
       wsRef.current.onopen = () => {
@@ -337,31 +341,87 @@ const GeminiAudioChat = () => {
     }
   };
 
-  // --- Emotion capture logic (from emo_test.jsx) ---
+  // --- Emotion capture logic (real backend integration) ---
   useEffect(() => {
+    let interval = null;
+    let ws = null;
+    if (!emotionDetectionEnabled) {
+      // Stop webcam if running
+      if (webcamStreamRef.current) {
+        webcamStreamRef.current.getTracks().forEach(track => track.stop());
+        webcamStreamRef.current = null;
+      }
+      setEmotion((prev) => ({ ...prev, aggregated: '' }));
+      if (emotionWs) {
+        emotionWs.close();
+        setEmotionWs(null);
+      }
+      return;
+    }
     // Start webcam
     navigator.mediaDevices
       .getUserMedia({ video: true })
       .then((stream) => {
+        setCameraPermission(true);
+        webcamStreamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
-        const interval = setInterval(() => {
+        // Open emotion WebSocket
+        ws = new WebSocket('ws://localhost:8000/');
+        setEmotionWs(ws);
+        ws.onopen = () => {
+          // Send setup message if needed by backend
+          ws.send(JSON.stringify({ setup: { mode: 'emotion' } }));
+        };
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.emotion) {
+              setEmotion(data.emotion);
+            }
+          } catch (e) {}
+        };
+        ws.onerror = (e) => {
+          setCameraPermission(false);
+        };
+        ws.onclose = () => {
+          setEmotionWs(null);
+        };
+        interval = setInterval(() => {
           const canvas = canvasRef.current;
           const video = videoRef.current;
-          if (canvas && video) {
+          if (canvas && video && ws && ws.readyState === WebSocket.OPEN) {
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            // Here you would run your emotion detection model on the frame
-            // For demo, we'll just set a fake emotion
-            // Replace this with your real model inference
-            setEmotion((prev) => ({ ...prev, aggregated: 'happy' }));
+            canvas.toBlob((blob) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const base64data = reader.result.split(',')[1];
+                ws.send(JSON.stringify({ frame: base64data }));
+              };
+              reader.readAsDataURL(blob);
+            }, 'image/jpeg', 0.8);
           }
         }, 1000);
-        return () => clearInterval(interval);
       })
-      .catch((err) => console.error('Error accessing webcam:', err));
-  }, []);
+      .catch((err) => {
+        setCameraPermission(false);
+        setEmotion((prev) => ({ ...prev, aggregated: '' }));
+        if (ws) ws.close();
+        console.error('Error accessing webcam:', err);
+      });
+    // Cleanup on unmount or disable
+    return () => {
+      if (interval) clearInterval(interval);
+      if (webcamStreamRef.current) {
+        webcamStreamRef.current.getTracks().forEach(track => track.stop());
+        webcamStreamRef.current = null;
+      }
+      if (ws) ws.close();
+      setEmotionWs(null);
+    };
+  }, [emotionDetectionEnabled]);
 
   // --- TTS to PCM using Web Audio API ---
   const synthesizeEmotionPCM = async (emotionText) => {
@@ -370,11 +430,7 @@ const GeminiAudioChat = () => {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         const utter = new window.SpeechSynthesisUtterance(emotionText);
         utter.lang = 'en-US';
-        let source;
         let dest = audioCtx.createMediaStreamDestination();
-        utter.onstart = () => {
-          source = audioCtx.createMediaStreamSource(dest.stream);
-        };
         utter.onend = async () => {
           // Record the TTS output
           const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm' });
@@ -384,8 +440,29 @@ const GeminiAudioChat = () => {
             const blob = new Blob(chunks, { type: 'audio/webm' });
             const arrayBuffer = await blob.arrayBuffer();
             // Decode to PCM
-            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            const pcm = audioBuffer.getChannelData(0);
+            let audioBuffer;
+            try {
+              audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            } catch (e) {
+              resolve(null); // decoding failed
+              return;
+            }
+            // Resample to 16kHz mono if needed
+            let pcm = audioBuffer.getChannelData(0);
+            if (audioBuffer.sampleRate !== 16000) {
+              // Simple resample (linear interpolation)
+              const ratio = audioBuffer.sampleRate / 16000;
+              const newLength = Math.floor(pcm.length / ratio);
+              const resampled = new Float32Array(newLength);
+              for (let i = 0; i < newLength; i++) {
+                const idx = i * ratio;
+                const idxLow = Math.floor(idx);
+                const idxHigh = Math.min(Math.ceil(idx), pcm.length - 1);
+                const weight = idx - idxLow;
+                resampled[i] = (1 - weight) * pcm[idxLow] + weight * pcm[idxHigh];
+              }
+              pcm = resampled;
+            }
             resolve(new Float32Array(pcm));
           };
           recorder.start();
@@ -422,15 +499,20 @@ const GeminiAudioChat = () => {
       let offset = 0;
       audioChunksRef.current.forEach(chunk => { combinedPCM.set(chunk, offset); offset += chunk.length; });
       // Synthesize emotion TTS to PCM and prepend
-      const emotionText = `The user's emotion is: ${emotion.aggregated}`;
+      let emotionText = '';
+      if (emotionDetectionEnabled && emotion.aggregated) {
+        emotionText = `The user's emotion is: ${emotion.aggregated}`;
+      }
       let ttsPCM = null;
       try {
-        ttsPCM = await synthesizeEmotionPCM(emotionText);
+        if (emotionText) {
+          ttsPCM = await synthesizeEmotionPCM(emotionText);
+        }
       } catch (err) {
         addLog('TTS error, sending only user audio', 'error');
       }
       let finalPCM;
-      if (ttsPCM && ttsPCM.length > 0) {
+      if (ttsPCM && ttsPCM.length > 0 && !isNaN(ttsPCM[0])) {
         finalPCM = new Float32Array(ttsPCM.length + combinedPCM.length);
         finalPCM.set(ttsPCM, 0);
         finalPCM.set(combinedPCM, ttsPCM.length);
@@ -442,14 +524,14 @@ const GeminiAudioChat = () => {
         const message = {
           type: 'audio_input',
           audio_data: base64Data,
-          emotion: emotion.aggregated,
+          emotion: emotionDetectionEnabled ? emotion.aggregated : '',
           format: 'pcm',
           sample_rate: 16000,
           channels: 1,
           bits_per_sample: 16
         };
         wsRef.current.send(JSON.stringify(message));
-        addLog(`Audio sent (${(finalPCM.length / 16000).toFixed(2)}s) with emotion: ${emotion.aggregated}`, 'user-input');
+        addLog(`Audio sent (${(finalPCM.length / 16000).toFixed(2)}s) with emotion: ${emotionDetectionEnabled ? emotion.aggregated : 'none'}`, 'user-input');
       }
     }
     audioChunksRef.current = [];
@@ -598,6 +680,19 @@ const GeminiAudioChat = () => {
           {isMuted ? 'Unmute' : 'Mute'}
         </button>
 
+        <button
+          onClick={() => setEmotionDetectionEnabled((v) => !v)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${emotionDetectionEnabled ? 'bg-yellow-600 text-white hover:bg-yellow-700' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}
+        >
+          {emotionDetectionEnabled ? 'Disable Emotion Detection' : 'Enable Emotion Detection'}
+        </button>
+        {emotionDetectionEnabled && cameraPermission === false && (
+          <span className="text-red-600 text-sm ml-2">Camera permission denied</span>
+        )}
+        {emotionDetectionEnabled && cameraPermission === true && (
+          <span className="text-green-600 text-sm ml-2">Emotion detection active</span>
+        )}
+
         {audioQueueLength > 0 && (
           <button
             onClick={clearAudioQueue}
@@ -633,7 +728,7 @@ const GeminiAudioChat = () => {
         <p>• Queue shows pending audio chunks for smooth playback</p>
       </div>
 
-      <video ref={videoRef} autoPlay playsInline className="w-32 rounded shadow" style={{ display: 'none' }} />
+      <video ref={videoRef} autoPlay playsInline className="w-32 rounded shadow" style={{ display: emotionDetectionEnabled ? 'block' : 'none' }} />
       <canvas ref={canvasRef} width="224" height="224" style={{ display: 'none' }} />
     </div>
   );

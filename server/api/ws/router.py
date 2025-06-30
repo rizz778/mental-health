@@ -139,6 +139,8 @@ async def websocket_endpoint(
                     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                     current_emotion = emotion_service.analyze_frame(frame)
                     aggregated = emotion_service.get_aggregated_emotion()
+                    # Only log the captured emotion
+                    logger.info(f"[Emotion] Captured: current={current_emotion}, aggregated={aggregated}")
                     await websocket.send_json({
                         "emotion": {
                             "current": current_emotion,
@@ -146,7 +148,6 @@ async def websocket_endpoint(
                         }
                     })
                 except Exception as e:
-                    logger.error(f"[Emotion] Error processing frame: {e}")
                     await websocket.send_json({"error": "Emotion processing failed"})
             else:
                 await websocket.send_json({"error": "Unsupported message format"})
@@ -182,13 +183,9 @@ audio_manager = AudioConnectionManager()
 
 @router.websocket("/audio")
 async def audio_websocket_endpoint(websocket: WebSocket):
-    import os
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        await websocket.close(code=1008, reason="GEMINI_API_KEY not found")
-        return
+    
     try:
-        await audio_manager.connect(websocket, api_key)
+        await audio_manager.connect(websocket)
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
