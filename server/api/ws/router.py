@@ -7,9 +7,12 @@ import cv2
 from fastapi import APIRouter, Depends, WebSocket
 from services.gemini_service import GeminiService
 from services.audio_service import AudioService
+from services.distress_service import DistressScoreService
+from google.genai import Client as GeminiClient
 from google.genai import types
 from api.deps import get_gemini_service
 from api.deps import get_audio_service
+from api.deps import get_distress_service
 import websockets
 
 logger = logging.getLogger(__name__)
@@ -39,7 +42,8 @@ def get_config_from_setup(setup_data, default_model):
 async def websocket_endpoint(
     websocket: WebSocket,
     gemini_service: GeminiService = Depends(get_gemini_service),
-    audio_service: AudioService = Depends(get_audio_service)
+    audio_service: AudioService = Depends(get_audio_service),
+    distress_service: DistressScoreService = Depends(get_distress_service)
 ):
     active_sessions = {}
     await websocket.accept()
@@ -161,6 +165,21 @@ async def websocket_endpoint(
                                 user_turns,
                                 turn_complete
                             )
+                            user_messages = []
+                            for turn in user_turns:
+                                if turn.get("role") == "user":
+                                    for part in turn.get("parts", []):
+                                        user_messages.append({"type": "user", "content": part.get("text", "")})
+
+                            async def send_distress_score():
+                                score = await distress_service.calculate_distress_score(user_messages)
+                                if score is not None:
+                                    await websocket.send_json({
+                                            "type": "distress_score",
+                                            "score": score
+                                        })
+
+                            asyncio.create_task(send_distress_score())
                         else:
                             logger.error(f"[WebSocket] No text session available for {client_id}")
                             await websocket.send_json({"error": "Text session not available"})

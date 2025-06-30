@@ -49,6 +49,8 @@ const Test = () => {
   //Auto Reconnect
   const [resumeHandle, setResumeHandle] = useState(null);
   const [shouldReconnect, setShouldReconnect] = useState(false);
+
+  const [distressScore, setDistressScore] = useState(null);
   // Auto-scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -208,6 +210,11 @@ const Test = () => {
           setSessionHandle(data.handle);
           addSystemMessage("Session can be resumed.");
         }
+        break;
+
+      case "distress_score":
+        // Show the score somewhere in your UI
+        setDistressScore(data.score);
         break;
 
       default:
@@ -713,6 +720,10 @@ const Test = () => {
           <span>Tokens: {totalTokens}</span>
           <span>Session: {hasActiveSession ? "Active" : "Inactive"}</span>
           <span>Status: {isTyping ? "Waiting for response..." : "Ready"}</span>
+          <br />
+          <span>
+            Distress Score: {distressScore !== null ? distressScore : "N/A"}
+          </span>
         </div>
       </div>
     </div>

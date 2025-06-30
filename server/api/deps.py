@@ -1,5 +1,7 @@
 from services.gemini_service import GeminiService
 from services.audio_service import AudioService
+from services.distress_service import DistressScoreService
+
 from core.config import settings
 class DependencyStorage:
 
@@ -11,8 +13,11 @@ class DependencyStorage:
         self._gemini_service=GeminiService(api_key=api_key,model=gemini_model)
         self._audio_service=AudioService(api_key=api_key,model=gemini_model)
 
+    def get_distress_service(self) -> DistressScoreService:
+        # Use your actual Gemini API key here or from env/config
+        return DistressScoreService(api_key=settings.DISTRESS_API_KEY)
 
-    def get_gemini_service(self)->GeminiService:
+    def get_gemini_service(self) -> GeminiService:
         return self._gemini_service
     def get_audio_service(self)->AudioService:
         return self._audio_service
@@ -30,3 +35,8 @@ def get_audio_service()-> GeminiService:
     if dependency_storage is None:
         raise RuntimeError("Dependencies not initialized")
     return dependency_storage.get_audio_service()
+
+def get_distress_service() -> DistressScoreService:
+    if dependency_storage is None:
+        raise RuntimeError("Dependencies not initialized")
+    return dependency_storage.get_distress_service()
