@@ -25,8 +25,12 @@ const Test = () => {
   const currentResponseRef = useRef("");
 
   // Config
-  const [systemInstruction, setSystemInstruction] = useState("");
+  const [systemInstruction, setSystemInstruction] = useState(
+    "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language."
+  );
   const [wsUrl, setWsUrl] = useState("ws://localhost:8000");
+
+  // "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language."
 
   // Stats
   const [totalTokens, setTotalTokens] = useState(0);
