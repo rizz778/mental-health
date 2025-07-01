@@ -1,4 +1,5 @@
 from services.gemini_service import GeminiService
+from services.emotion_service import EmotionService
 from services.audio_service import AudioService
 from services.distress_service import DistressScoreService
 from services.emotion_service import EmotionService
@@ -20,13 +21,9 @@ class DependencyStorage:
 
     def get_gemini_service(self) -> GeminiService:
         return self._gemini_service
-
-    def get_audio_service(self) -> AudioService:
-        return self._audio_service
-
-    def get_emotion_service(self) -> EmotionService:
-        return self._emotion_service  # <-- Always return the same instance
-
+    def get_emotion_service(self)->EmotionService:
+        return self._emotion_service
+    
 async def initialize_dependencies():
     global dependency_storage
     dependency_storage = DependencyStorage(api_key=settings.GEMINI_API_KEY, gemini_model=settings.GEMINI_MODEL)
@@ -36,9 +33,12 @@ def get_gemini_service() -> GeminiService:
         raise RuntimeError("Dependencies not initialized")
     return dependency_storage.get_gemini_service()
 
-def get_audio_service() -> AudioService:
+
+
+def get_emotion_service()-> GeminiService:
     if dependency_storage is None:
         raise RuntimeError("Dependencies not initialized")
+    return dependency_storage.get_emotion_service()
     return dependency_storage.get_audio_service()
 
 def get_distress_service() -> DistressScoreService:

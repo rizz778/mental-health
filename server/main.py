@@ -8,8 +8,6 @@ import structlog
 import os
 import logging
 import asyncio
-
-
 from datetime import datetime, date
 from core.config import settings
 from core.logging import setup_logging, get_logger
@@ -18,28 +16,24 @@ from core.handlers import app_exception_handler, validation_exception_handler, g
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from api.deps import initialize_dependencies
 from api.ws.router import router as ws_router
-from services.gemini_service import GeminiService
-# from services.emotion_service import EmotionService  # NEW IMPORT
-from services.audio_service import AudioService
+from api import distress_score
+
+
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    logger = get_logger(__name__)
-
     try:
         await initialize_dependencies()
-        logger.info("Dependencies initialized successfully")
         yield
     
     except Exception as e:
-        logger.error(f"Failed to start application: {str(e)}")
         raise
 
 class CustomJSONResponse(JSONResponse):
     def render(self, content) -> bytes:
-        from server.core.json import custom_jsonable_encoder
+        from core.json import custom_jsonable_encoder  # Fixed import
         return super().render(custom_jsonable_encoder(content))
 
 app = FastAPI(
@@ -58,7 +52,7 @@ app.add_exception_handler(Exception, generic_exception_handler)
 # Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,9 +71,11 @@ async def add_request_id(request: Request, call_next):
     return response
 
 app.include_router(ws_router)
+app.include_router(distress_score.router)
 
 
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
 
