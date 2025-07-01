@@ -24,20 +24,16 @@ from api import distress_score
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    logger = get_logger(__name__)
-
     try:
         await initialize_dependencies()
-        logger.info("Dependencies initialized successfully")
         yield
     
     except Exception as e:
-        logger.error(f"Failed to start application: {str(e)}")
         raise
 
 class CustomJSONResponse(JSONResponse):
     def render(self, content) -> bytes:
-        from server.core.json import custom_jsonable_encoder
+        from core.json import custom_jsonable_encoder  # Fixed import
         return super().render(custom_jsonable_encoder(content))
 
 app = FastAPI(
@@ -56,7 +52,7 @@ app.add_exception_handler(Exception, generic_exception_handler)
 # Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

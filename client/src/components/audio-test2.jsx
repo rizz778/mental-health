@@ -33,7 +33,7 @@ const GeminiAudioChat = () => {
   const canvasRef = useRef(null);
   const webcamStreamRef = useRef(null);
   const [emotion, setEmotion] = useState({ current: '', aggregated: '' });
-
+ const [distress,setDistress]=useState(0);
   const addLog = useCallback((message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs(prev => [...prev.slice(-50), { timestamp, message, type }]);
@@ -587,14 +587,15 @@ const GeminiAudioChat = () => {
     try {
       addLog('Analyzing distress score...', 'info');
       // Replace this URL with your actual Gemini text API endpoint
-      const response = await fetch('/api/distress-score', {
+      const response = await fetch('http://localhost:8000/api/distress-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText })
       });
       if (!response.ok) throw new Error('API error');
       const data = await response.json();
-      addLog(`Distress score: ${data.score}`, 'warning');
+      setDistress(data.score); // Fix: set only the score, not the whole object
+      console.log(data.score)
     } catch (err) {
       addLog('Distress score analysis failed', 'error');
     }
@@ -690,6 +691,9 @@ const GeminiAudioChat = () => {
             <b>Gemini's last output (transcribed):</b> {outputTranscript}
           </div>
         )}
+        <div>
+          <b>Distress Score:</b>{distress}
+        </div>
       </div>
 
       <div className="mb-6">

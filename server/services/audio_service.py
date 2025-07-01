@@ -26,7 +26,7 @@ def get_access_token():
 
 class GeminiAudioService:
     def __init__(self):
-        self.api_key = 'ya29.c.c0ASRK0GYAb0TtyjeDpgd32Jvik1NUKa6BbE0hstWasWct9b3oKFE3075qYfk_8kROuTu8c6u_MtTMqsNJ2Ap74j2TBFb4nlUZu_ysarv9gikpJ62HNXybiLJAtQddU3EXWufKohk20HY4zmRW3Mb6OfUDl8T3XVEbO50o-g_eMWvzEdafGc37YDP6njpRrplOkQ6aSZYB9weSzC-leT_ez9siOk3c1w4b4hhWSMAFZC5MiD9--Zo_POjHiACX6bWu-yFq5DxxCnbsoqTktfboHTYG0BtqkOTGCpUH5zl42Z3k8VxprFwCWuKiwsSPDRWG3yHqtl0W9Cyv5JZahiT27CaOKJs-D5FU9yHZBfogVsCV7go6kKGbf-pbegL387Kk74Rk0W9OkFc-uMgcj8lxpzqgwptx1-jfWFaxX_JIh9jR1IUMSXWBawVztIdZxShe-BVoxa8-jQeo6aisXYoZZgrcx524Oi7snV0IFgalh9Qr6OQxwFBnma22xnoaynby14U4jrWf-ZmJbmUjjri_hW4ZlQ_Jl9o4r_I355spoYaM-yRcnc57dXQB8qgyOX_p7UMQ9hn9wJldqFmhSosx311g-jO4jue94e1a0hFMS7VxiBbb2xQxV3g64xnf3W7BZue9lgXukWUjo76SZbFV11i4r6ZudelRvzV2vome9Or2OWsexqc39Rl_r1Ih7aBrwihn4ftQr5hwoBQwQ6Zjs2U4co9x-_gmV2J70w5WjO1o6QmgJx_82jZ69WWyuaQng9we4WuqJu0wBrbYh-uMcSh363vtYzvc5sv4fMoOa7tItjVk-wxo16bwiyIJjz65r2tJVFasS49JV1_YSd2m3Mn38qjadp5j8YSU8Rg6gbMZR63Vc92VU8xSW27j2v6ivzl975dfhUZFa7__8h-cJy-YaYdtBVr0k_JqFUZuWnBtzqF8reyudWZhkzQ0w4zdx-Mc8tI-fFFVXnat0bJIQsjn1Ba4-7on5Y44_oFfJk9J2q3zptoS07i'
+        self.api_key = 'ya29.c.c0ASRK0GY05ZJvo7naDNgL2Vi8uv0KLGU2_4a1inOC9beMAxpai6XPKC7E4TnMdsR47P1F84vjMsrdKd1En4lfX341uH7WQiijMKVkQwa5RGOqpGlMY0HT0I61yz8rYoNVBozJ30dgJ3Omqb1YxwXREO_qyXTzwPBVtwCGIFL4vJKtuY9AogcGTRZ9nGAEsJ1Y2hj5DUnt3FqHybS65590jFwkmVR663_LKKoJoimtB9cR3IQE83bNBIjMVGne2LNuTGkoe33m0QZ6-XL8LeqBlTEivDKD15WAd3yzd17aWLWuEq7L_PzI1-gBgIyFOFVpj1bTx0VeyOQb4yBDYcPpswodv45Lz3X-l6s-bT2v6Sl2cIahmzhOzvAS-AE387AW2QV9Rd2xg5aaqIusxus4fprd-jzRFgeucyJ6kswoZver-7X2cO40k-Mqm4sqtc_Ovhin1poqZm-lVsrwpQs29dV496jmeguycUfjbewJ-rpWejWSJ_31jisaFOzS57l8fcie5SsURicWs6knxg_8W9b_RjORQu8RaxhOQ5J1Ql7jUkox_6kWFFMlknmuMruz_F97W4veUp-3VXs-fkq040dMZF57XRmpbUZmSFgr2BXBwzm2VBsvuZW028Sa-_cnFjpw2BRy_Yf6JQXqsvusY6b-9fIb7B1m-Smi4p00w9Y4tY7Vmu5Q5e3Bc4srwpfirbhXF4WWuXVM3pee_5sgjd_nQzrwXbBo1wjvB7rh8pwYm_Bk4WYMbaqSwBhWggS_rVXRaFd-gXdyg3h78rm4v1dfIylZm3uji8gX7z49hclFvpsnmbsIini2MSmIryorYvZ_1mQSBOrlb45Qy6bB6JpgsISOu3_hRZkjaIrFhp6Fx1RnMU9SSzqFO6vu3piccaaU5c4WubwgmbeB_RQXwiocot0ezXX722leqYQ92j-lXuj2vgOxuM0_q0tkioWFhdmltQZa6qc2cBVIUBzjy-sqwRJOf0UnjIWhbfd4QjnUbcpveFlgyff'
         self.websocket = None
         self.connected = False
         self.config = None
@@ -44,6 +44,22 @@ class GeminiAudioService:
 
     async def send_setup(self, config: Dict[str, Any]):
         logger.info(f"[GeminiAudioService] Sending setup: {config}")
+        # Synthetic multi-turn conversation history with emotion context
+        example_history = [
+            {"role": "user", "text": "I feel anxious."},
+            {"role": "therapist", "text": "I'm sorry you're feeling anxious. Can you share what's on your mind?"},
+            {"role": "user", "text": "About tommorows's presentation"},
+            {"role": "therapist", "text": "That's okay you will be alright"},
+            
+        ]
+        
+       
+        system_prompt = (
+                "You are a supportive therapist. Here is an example conversation:\n" +
+                "\n".join([f"{turn['role'].capitalize()}: {turn['text']}" for turn in example_history]) +
+                f"\n\nFor this session, if the user's first sentence is about their emotion (e.g., 'User is feeling happy'), respond empathetically and tailor your reply to that emotion. Otherwise, respond as a general therapist."
+            )
+        
         setup_message = {
             "setup": {
                 "model": config.get("model", "models/gemini-2.5-flash-preview-native-audio-dialog"),
@@ -60,7 +76,7 @@ class GeminiAudioService:
                 "inputAudioTranscription": {},
                 "outputAudioTranscription": {},
                 "systemInstruction": {
-                    "parts": [{ "text": "You are a helpful assistant." }]
+                    "parts": [{ "text": system_prompt }]
                 },
                 "tools": []
             }
