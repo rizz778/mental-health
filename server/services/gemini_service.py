@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from xml.parsers.expat import model
 from google import genai
 
 
@@ -11,7 +12,7 @@ class GeminiService:
         self.client = genai.Client(api_key=api_key)
         self.model = model
 
-    async def start_session(self, config):
+    async def start_session(self, config, model=None):
         # Enable context window compression with a sliding window
         from google.genai import types
         # If config is a dict, build a LiveConnectConfig object
@@ -26,19 +27,31 @@ class GeminiService:
             config.context_window_compression = types.ContextWindowCompressionConfig(
                 sliding_window=types.SlidingWindow()
             )
-        session_cm = self.client.aio.live.connect(model=self.model, config=config)
+        model_to_use = model or self.model
+        session_cm = self.client.aio.live.connect(model=model_to_use, config=config)
         session = await session_cm.__aenter__()
         return session, session_cm
 
     
     async def send_client_content(self, session, turns, turn_complete=True):
-        # Send the full conversation history (multi-turn)
-        if turns:
-            print("[GeminiService] Sending to Gemini (raw dict, multi-turn):", turns, "turn_complete:", turn_complete)
-            await session.send_client_content(turns=turns, turn_complete=turn_complete)
-        else:
-            # If no turns, do nothing or raise error
-            pass
+        # Defensive: Validate structure before sending
+        if not isinstance(turns, list):
+            logger.error(f"[GeminiService] 'turns' is not a list: {turns}")
+            return
+        for i, turn in enumerate(turns):
+            if not isinstance(turn, dict) or "role" not in turn or "parts" not in turn:
+                logger.error(f"[GeminiService] Invalid turn at index {i}: {turn}")
+                return
+            if not isinstance(turn["parts"], list):
+                logger.error(f"[GeminiService] 'parts' is not a list at index {i}: {turn['parts']}")
+                return
+            for j, part in enumerate(turn["parts"]):
+                if not isinstance(part, dict) or "text" not in part:
+                    logger.error(f"[GeminiService] Invalid part at turn {i}, part {j}: {part}")
+                    return
+
+        print("[GeminiService] Sending to Gemini (raw dict, multi-turn):", turns, "turn_complete:", turn_complete)
+        await session.send_client_content(turns=turns, turn_complete=turn_complete)
 
     async def _safe_websocket_send(self, websocket, client_id, data_dict):
         """Safely send data to websocket with proper error handling"""
@@ -51,8 +64,9 @@ class GeminiService:
                 logger.error(f"[Gemini] Invalid websocket object for client {client_id}")
                 return False
             
-            payload = json.dumps(data_dict)
-            await websocket.send(payload)
+            # payload = json.dumps(data_dict)
+            # await websocket.send(payload)
+            await websocket.send_json(data_dict)
             return True
         except Exception as e:
             logger.error(f"[Gemini] Safe websocket send failed for {client_id}: {e}")

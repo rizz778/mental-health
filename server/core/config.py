@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     #GPT
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: Optional[str] = None
-    
+    DISTRESS_API_KEY: Optional[str] = None
     
     @validator("ALLOWED_ORIGINS", pre=True)
     def parse_allowed_origins(cls, v):

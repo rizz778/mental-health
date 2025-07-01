@@ -11,8 +11,8 @@ function App() {
 
   return (
     <>
-      <GeminiAudioChat/>
-      {/* <Test/> */}
+      {/* <GeminiAudioChat/> */}
+      <Test />
     </>
   );
 }

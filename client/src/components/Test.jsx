@@ -1,79 +1,129 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const Test = () => {
   // Connection state
+
+  const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
+
   const [isConnected, setIsConnected] = useState(false);
   const [hasActiveSession, setHasActiveSession] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
-  
+  const [connectionStatus, setConnectionStatus] = useState("Disconnected");
+
   // UI state
   const [toolsEnabled, setToolsEnabled] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  
+
+  const [emotion, setEmotion] = useState({ current: "", aggregated: "" });
+  // const emotionSocketRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    if (!emotionDetectionEnabled) return;
+    let interval;
+    navigator.mediaDevices
+      .getUserMedia({ video: true })
+      .then((stream) => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        interval = setInterval(() => {
+          const ws = wsRef.current; // <-- use main chat websocket
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          const canvas = canvasRef.current;
+          const video = videoRef.current;
+          if (canvas && video) {
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataURL = canvas.toDataURL("image/jpeg");
+            const base64 = dataURL.split(",")[1];
+            ws.send(JSON.stringify({ frame: base64 }));
+          }
+        }, 1000);
+      })
+      .catch((err) => console.error("Error accessing webcam:", err));
+
+    return () => {
+      if (interval) clearInterval(interval);
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [emotionDetectionEnabled]);
   // Messages and input
   const [messages, setMessages] = useState([
     {
       id: 1,
-      type: 'system',
-      content: 'Welcome to Live API Chat Demo! Connect to the WebSocket server and start a session to begin chatting.'
-    }
+      type: "system",
+      content:
+        "Welcome to Live API Chat Demo! Connect to the WebSocket server and start a session to begin chatting.",
+    },
   ]);
-  const [messageInput, setMessageInput] = useState('');
-  const [currentResponse, setCurrentResponse] = useState('');
-  const currentResponseRef = useRef('');
-  
+  const [messageInput, setMessageInput] = useState("");
+  const [currentResponse, setCurrentResponse] = useState("");
+  const currentResponseRef = useRef("");
+
   // Config
-  const [systemInstruction, setSystemInstruction] = useState('');
-  const [wsUrl, setWsUrl] = useState('ws://localhost:8000');
-  
+  const [systemInstruction, setSystemInstruction] = useState(
+    "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
+  );
+  const [wsUrl, setWsUrl] = useState("ws://localhost:8000");
+
+  // "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language."
+
   // Stats
   const [totalTokens, setTotalTokens] = useState(0);
-  
+
   // Status messages
-  const [errorMessage, setErrorMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
-  
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+
   // Refs
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const messageIdRef = useRef(2);
-  
+
   // Session resumption handle
   const [sessionHandle, setSessionHandle] = useState(null);
   //Auto Reconnect
   const [resumeHandle, setResumeHandle] = useState(null);
-const [shouldReconnect, setShouldReconnect] = useState(false);
+  const [shouldReconnect, setShouldReconnect] = useState(false);
+
+  const [distressScore, setDistressScore] = useState(null);
   // Auto-scroll to bottom
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
-  
+
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping, currentResponse]);
-  
+
   // Auto-hide status messages
   useEffect(() => {
     if (errorMessage) {
-      const timer = setTimeout(() => setErrorMessage(''), 3000);
+      const timer = setTimeout(() => setErrorMessage(""), 3000);
       return () => clearTimeout(timer);
     }
   }, [errorMessage]);
-  
+
   useEffect(() => {
     if (successMessage) {
-      const timer = setTimeout(() => setSuccessMessage(''), 3000);
+      const timer = setTimeout(() => setSuccessMessage(""), 3000);
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
-  
+
   useEffect(() => {
     if (shouldReconnect && resumeHandle) {
       setShouldReconnect(false);
       // Wait a moment to ensure the socket is closed before reconnecting
       setTimeout(() => {
-        console.log('[Client] Triggering session reconnect with resume handle:', resumeHandle);
+        console.log(
+          "[Client] Triggering session reconnect with resume handle:",
+          resumeHandle
+        );
         connect(true); // Pass a flag to indicate resumption
       }, 500);
     }
@@ -81,17 +131,25 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
   // WebSocket message handler
   const handleServerMessage = useCallback((data) => {
     // Only log session reconnect events
-    if (data.type === 'session_warning' && data.resume_handle) {
+    if (data.type === "session_warning" && data.resume_handle) {
       setResumeHandle(data.resume_handle);
       setShouldReconnect(true);
-      addSystemMessage('Session expiring, reconnecting to resume...');
+      addSystemMessage("Session expiring, reconnecting to resume...");
     }
     // Handle serverContent from Gemini Live API
+    if (data.emotion) {
+      setEmotion(data.emotion);
+      return;
+    }
+    if (data.error) {
+      showError(data.error);
+      return;
+    }
     if (data.serverContent) {
       const modelTurn = data.serverContent.modelTurn;
       if (modelTurn && modelTurn.parts && modelTurn.parts.length > 0) {
         const text = modelTurn.parts[0].text;
-        setCurrentResponse(prev => {
+        setCurrentResponse((prev) => {
           const updated = prev + text;
           currentResponseRef.current = updated;
           return updated;
@@ -100,159 +158,166 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
       }
       if (data.serverContent.generationComplete) {
         if (currentResponseRef.current) {
-          addMessage('model', currentResponseRef.current);
+          addMessage("model", currentResponseRef.current);
         }
-        setCurrentResponse('');
-        currentResponseRef.current = '';
+        setCurrentResponse("");
+        currentResponseRef.current = "";
         setIsTyping(false);
       }
       if (data.serverContent.turnComplete) {
-        console.log('[Client] Turn complete');
+        console.log("[Client] Turn complete");
       }
       return;
     }
     // Handle setupComplete to mark session as active
     if (data.setupComplete !== undefined) {
       setHasActiveSession(true);
-      addSystemMessage('Session setup complete - You can now send messages');
+      addSystemMessage("Session setup complete - You can now send messages");
       return;
     }
     // Handle other message types
     switch (data.type) {
-      case 'connection_established':
-        showSuccess(data.message || 'Connected to Live API Bridge');
+      case "connection_established":
+        showSuccess(data.message || "Connected to Live API Bridge");
         break;
-        
-      case 'session_started':
+
+      case "session_started":
         setHasActiveSession(true);
-        showSuccess('Session started successfully');
-        addSystemMessage('Session started - You can now send messages');
+        showSuccess("Session started successfully");
+        addSystemMessage("Session started - You can now send messages");
         break;
-        
-      case 'session_ended':
+
+      case "session_ended":
         setHasActiveSession(false);
-        addSystemMessage('Session ended');
+        addSystemMessage("Session ended");
         break;
-        
-      case 'text_chunk':
+
+      case "text_chunk":
         // Handle streaming text from the model
 
         if (!data.complete) {
           setIsTyping(true);
-          setCurrentResponse(prev => {
+          setCurrentResponse((prev) => {
             const updated = prev + data.content;
             currentResponseRef.current = updated;
             return updated;
           });
         }
         break;
-        
-      case 'generation_complete':
+
+      case "generation_complete":
         setIsTyping(false);
-        
+
         // Only add message if we have accumulated response and no serverContent message handled it
         if (currentResponseRef.current) {
-          addMessage('model', currentResponseRef.current);
+          addMessage("model", currentResponseRef.current);
         }
-        
-        setCurrentResponse('');
-        currentResponseRef.current = '';
+
+        setCurrentResponse("");
+        currentResponseRef.current = "";
         break;
-        
-      case 'message_sent':
-        console.log('[Client] Message acknowledged by server');
+
+      case "message_sent":
+        console.log("[Client] Message acknowledged by server");
         break;
-        
-      case 'usage_update':
+
+      case "usage_update":
         if (data.total_tokens) {
           setTotalTokens(data.total_tokens);
         }
         break;
-        
-      case 'tool_call':
+
+      case "tool_call":
         addSystemMessage(`Tool called: ${data.tool_call}`);
         break;
-        
-      case 'interrupted':
+
+      case "interrupted":
         setIsTyping(false);
-        setCurrentResponse('');
-        currentResponseRef.current = '';
-        addSystemMessage('Generation was interrupted');
+        setCurrentResponse("");
+        currentResponseRef.current = "";
+        addSystemMessage("Generation was interrupted");
         break;
-        
-      case 'session_warning':
-        showError(data.message || 'Session warning');
+
+      case "session_warning":
+        showError(data.message || "Session warning");
         break;
-        
-      case 'configuration_updated':
-        showSuccess(data.message || 'Configuration updated');
+
+      case "configuration_updated":
+        showSuccess(data.message || "Configuration updated");
         break;
-        
-      case 'error':
+
+      case "error":
         setIsTyping(false);
-        setCurrentResponse('');
-        currentResponseRef.current = '';
-        showError(data.message || 'An error occurred');
+        setCurrentResponse("");
+        currentResponseRef.current = "";
+        showError(data.message || "An error occurred");
         break;
-        
-      case 'session_resumption_update':
+
+      case "session_resumption_update":
         if (data.handle) {
           setSessionHandle(data.handle);
-          addSystemMessage('Session can be resumed.');
+          addSystemMessage("Session can be resumed.");
         }
         break;
-        
+
+      case "distress_score":
+        // Show the score somewhere in your UI
+        setDistressScore(data.score);
+        break;
+
       default:
-        console.log('[Client] Unhandled message type:', data.type, data);
+        console.log("[Client] Unhandled message type:", data.type, data);
     }
   }, []);
-  
+
   // Helper functions
   const addMessage = (type, content) => {
     // Only allow 'user', 'model', or 'system' types
-    if (type !== 'user' && type !== 'model' && type !== 'system') return;
+    if (type !== "user" && type !== "model" && type !== "system") return;
     const newMessage = {
       id: messageIdRef.current++,
       type,
       content,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
-    setMessages(prev => [...prev, newMessage]);
+    setMessages((prev) => [...prev, newMessage]);
   };
-  
+
   const addSystemMessage = (content) => {
-    addMessage('system', content);
+    addMessage("system", content);
   };
-  
+
   const showError = (message) => {
     setErrorMessage(message);
-    console.error('[Client] Error:', message);
+    console.error("[Client] Error:", message);
   };
-  
+
   const showSuccess = (message) => {
     setSuccessMessage(message);
   };
-  
+
   const sendToServer = (message) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message));
     }
   };
-  
+
   // Build conversation turns for Gemini (only include actual conversation messages)
   const buildConversationTurns = (newUserMessage = null) => {
     // Only use 'user' and 'model' types, never 'assistant'
-    const conversationMessages = messages.filter(m => m.type === 'user' || m.type === 'model');
+    const conversationMessages = messages.filter(
+      (m) => m.type === "user" || m.type === "model"
+    );
     const turns = [];
-    conversationMessages.forEach(msg => {
-      if (msg.type === 'user') {
-        turns.push({ role: 'user', parts: [{ text: msg.content.trim() }] });
-      } else if (msg.type === 'model') {
-        turns.push({ role: 'model', parts: [{ text: msg.content.trim() }] });
+    conversationMessages.forEach((msg) => {
+      if (msg.type === "user") {
+        turns.push({ role: "user", parts: [{ text: msg.content.trim() }] });
+      } else if (msg.type === "model") {
+        turns.push({ role: "model", parts: [{ text: msg.content.trim() }] });
       }
     });
     if (newUserMessage) {
-      turns.push({ role: 'user', parts: [{ text: newUserMessage.trim() }] });
+      turns.push({ role: "user", parts: [{ text: newUserMessage.trim() }] });
     }
     // Enforce strict alternation: user, model, user, model...
     // Remove any duplicate roles in a row
@@ -267,12 +332,12 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
 
     return filteredTurns;
   };
-  
+
   // Connection handlers
   const connect = async () => {
     const url = wsUrl.trim();
     if (!url) {
-      showError('Please enter a WebSocket URL');
+      showError("Please enter a WebSocket URL");
       return;
     }
 
@@ -281,23 +346,28 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
 
       wsRef.current.onopen = () => {
         setIsConnected(true);
-        setConnectionStatus('Connected');
-        showSuccess('Connected to WebSocket server');
+        setConnectionStatus("Connected");
+        showSuccess("Connected to WebSocket server");
         // Send initial setup message
         const setupMsg = {
           setup: {
-            model: 'models/gemini-2.0-flash-live-001',
+            model: "gemini-2.0-flash-live-001",
             generationConfig: {
-              responseModalities: ['TEXT']
+              responseModalities: ["TEXT"],
             },
             systemInstruction: systemInstruction.trim() || undefined,
             tools: toolsEnabled ? [{}] : undefined,
-            ...(resumeHandle ? { sessionResumption: { handle: resumeHandle } } : {})
-          }
+            ...(resumeHandle
+              ? { sessionResumption: { handle: resumeHandle } }
+              : {}),
+          },
         };
         wsRef.current.send(JSON.stringify(setupMsg));
         if (resumeHandle) {
-          console.log('[Client] Reconnected and sent setup with resume handle:', resumeHandle);
+          console.log(
+            "[Client] Reconnected and sent setup with resume handle:",
+            resumeHandle
+          );
         }
         setResumeHandle(null);
       };
@@ -307,20 +377,23 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
           const data = JSON.parse(event.data);
           handleServerMessage(data);
         } catch (error) {
-          console.error('[Client] Error parsing server message:', error);
+          console.error("[Client] Error parsing server message:", error);
         }
       };
 
       wsRef.current.onclose = (event) => {
         setIsConnected(false);
         setHasActiveSession(false);
-        setConnectionStatus('Disconnected');
+        setConnectionStatus("Disconnected");
         setIsTyping(false);
-        setCurrentResponse('');
-        currentResponseRef.current = '';
+        setCurrentResponse("");
+        currentResponseRef.current = "";
         addSystemMessage(`Disconnected from server (Code: ${event.code})`);
         if (resumeHandle) {
-          console.log('[Client] Disconnected, will attempt to reconnect with resume handle:', resumeHandle);
+          console.log(
+            "[Client] Disconnected, will attempt to reconnect with resume handle:",
+            resumeHandle
+          );
           setTimeout(() => {
             connect(true); // will use resumeHandle in setup
           }, 500);
@@ -328,93 +401,98 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
       };
 
       wsRef.current.onerror = (error) => {
-        showError('WebSocket connection error');
-        console.error('[Client] WebSocket error:', error);
+        showError("WebSocket connection error");
+        console.error("[Client] WebSocket error:", error);
       };
-
     } catch (error) {
-      showError('Failed to connect: ' + error.message);
+      showError("Failed to connect: " + error.message);
     }
   };
-  
+
   const disconnect = () => {
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
-      console.log('[Client] Manually disconnected from WebSocket server');
+      console.log("[Client] Manually disconnected from WebSocket server");
     }
   };
-  
+
   // Session handlers
   const startSession = async () => {
     if (!isConnected) {
-      showError('Not connected to server');
+      showError("Not connected to server");
       return;
     }
-    
+
     const message = messageInput.trim();
     if (!message) {
-      showError('Please enter a message to start the session.');
+      showError("Please enter a message to start the session.");
       return;
     }
     const turns = buildConversationTurns(message);
-    
+
     const payload = {
       clientContent: {
         turns: turns,
-        turnComplete: true
-      }
+        turnComplete: true,
+        emotion: emotion.current,
+      },
     };
-    
-    console.log('[Client] Starting session with payload:', payload);
+
+    console.log("[Client] Starting session with payload:", payload);
     sendToServer(payload);
-    
+
     // Add user message and prepare for response
-    addMessage('user', message);
-    setMessageInput('');
+    addMessage("user", message);
+    setMessageInput("");
     setIsTyping(true);
-    setCurrentResponse('');
-    currentResponseRef.current = '';
+    setCurrentResponse("");
+    currentResponseRef.current = "";
   };
-  
+
   const endSession = async () => {
     if (!hasActiveSession) return;
-    
+
     sendToServer({
-      type: "end_session"
+      type: "end_session",
     });
-    console.log('[Client] End session request sent');
+    console.log("[Client] End session request sent");
   };
-  
+
   // Message handlers
   const sendMessage = async () => {
     const message = messageInput.trim();
     if (!message || !hasActiveSession || isTyping) {
-      console.log('[Client] Cannot send message:', { message: !!message, hasActiveSession, isTyping });
+      console.log("[Client] Cannot send message:", {
+        message: !!message,
+        hasActiveSession,
+        isTyping,
+      });
       return;
     }
-    
+
     const turns = buildConversationTurns(message);
     const payload = {
       clientContent: {
         turns: turns,
-        turnComplete: true
-      }
+        turnComplete: true,
+        emotion: emotion.current,
+      },
     };
-    
-    console.log('[Client] Sending message with payload:', payload);
+
+    console.log("[Client] Sending message with payload:", payload);
     sendToServer(payload);
-    
+
     // Add user message and prepare for response
-    addMessage('user', message);
-    setMessageInput('');
+    addMessage("user", message);
+    setMessageInput("");
     setIsTyping(true);
-    setCurrentResponse('');
-    currentResponseRef.current = '';
+    setCurrentResponse("");
+    currentResponseRef.current = "";
   };
-  
+
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (hasActiveSession) {
         sendMessage();
@@ -423,37 +501,43 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
       }
     }
   };
-  
+
   // Control handlers
   const toggleTools = () => {
     setToolsEnabled(!toolsEnabled);
   };
-  
+
   const toggleConfig = () => {
     setShowConfig(!showConfig);
   };
-  
+
   const clearChat = () => {
-    setMessages([{
-      id: 1,
-      type: 'system',
-      content: 'Chat cleared. Welcome to Live API Chat Demo!'
-    }]);
+    setMessages([
+      {
+        id: 1,
+        type: "system",
+        content: "Chat cleared. Welcome to Live API Chat Demo!",
+      },
+    ]);
     messageIdRef.current = 2;
     setTotalTokens(0);
     setSessionHandle(null);
-    setCurrentResponse('');
-    currentResponseRef.current = '';
+    setCurrentResponse("");
+    currentResponseRef.current = "";
     setIsTyping(false);
-    console.log('[Client] Chat cleared');
+    console.log("[Client] Chat cleared");
   };
-  
+
   const saveConfig = () => {
-    showSuccess('Configuration saved');
+    showSuccess("Configuration saved");
     setShowConfig(false);
-    console.log('[Client] Configuration saved:', { systemInstruction, wsUrl, toolsEnabled });
+    console.log("[Client] Configuration saved:", {
+      systemInstruction,
+      wsUrl,
+      toolsEnabled,
+    });
   };
-  
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-400 via-purple-500 to-purple-700 flex items-center justify-center p-5">
       <div className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl w-full max-w-4xl h-[600px] flex flex-col overflow-hidden border border-white/20">
@@ -461,11 +545,15 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
         <div className="bg-gradient-to-r from-blue-500 to-cyan-400 text-white p-5 text-center">
           <h1 className="text-2xl font-bold mb-1">Live API Chat Demo</h1>
           <div className="flex items-center justify-center gap-2 text-sm opacity-90">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'} animate-pulse`}></div>
+            <div
+              className={`w-2 h-2 rounded-full ${
+                isConnected ? "bg-green-400" : "bg-red-400"
+              } animate-pulse`}
+            ></div>
             <span>{connectionStatus}</span>
           </div>
         </div>
-        
+
         {/* Controls */}
         <div className="p-4 bg-black/5 border-b border-black/10 flex flex-wrap gap-3 items-center">
           <div className="flex gap-2">
@@ -484,7 +572,7 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
               Disconnect
             </button>
           </div>
-          
+
           <div className="flex gap-2">
             <button
               onClick={startSession}
@@ -501,17 +589,25 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
               End Session
             </button>
           </div>
-          
+
           <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-gray-600">Tools:</label>
+            <label className="text-xs font-semibold text-gray-600">
+              Tools:
+            </label>
             <button
               onClick={toggleTools}
-              className={`relative w-10 h-5 rounded-full transition-colors ${toolsEnabled ? 'bg-blue-500' : 'bg-gray-300'}`}
+              className={`relative w-10 h-5 rounded-full transition-colors ${
+                toolsEnabled ? "bg-blue-500" : "bg-gray-300"
+              }`}
             >
-              <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${toolsEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+              <div
+                className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-transform ${
+                  toolsEnabled ? "translate-x-5" : "translate-x-0.5"
+                }`}
+              ></div>
             </button>
           </div>
-          
+
           <div className="flex gap-2">
             <button
               onClick={toggleConfig}
@@ -527,13 +623,15 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
             </button>
           </div>
         </div>
-        
+
         {/* Config Panel */}
         {showConfig && (
           <div className="p-4 bg-black/5 border-b border-black/10 animate-in slide-in-from-top duration-300">
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">System Instruction:</label>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  System Instruction:
+                </label>
                 <textarea
                   value={systemInstruction}
                   onChange={(e) => setSystemInstruction(e.target.value)}
@@ -542,7 +640,9 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">WebSocket URL:</label>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  WebSocket URL:
+                </label>
                 <input
                   type="text"
                   value={wsUrl}
@@ -559,7 +659,7 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
             </div>
           </div>
         )}
-        
+
         {/* Status Messages */}
         {errorMessage && (
           <div className="bg-red-500 text-white p-3 text-sm animate-in slide-in-from-top duration-300">
@@ -571,31 +671,34 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
             {successMessage}
           </div>
         )}
-        
+
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-5 bg-gray-50 space-y-4">
           {messages.map((message) => (
             <div
               key={message.id}
               className={`animate-in slide-in-from-bottom duration-300 ${
-                message.type === 'user' ? 'text-right' : 
-                message.type === 'system' ? 'text-center' : 'text-left'
+                message.type === "user"
+                  ? "text-right"
+                  : message.type === "system"
+                  ? "text-center"
+                  : "text-left"
               }`}
             >
               <div
                 className={`inline-block max-w-[70%] p-3 rounded-2xl text-sm leading-relaxed ${
-                  message.type === 'user' 
-                    ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white' 
-                    : message.type === 'system'
-                    ? 'bg-black/10 text-gray-600 text-xs'
-                    : 'bg-white border border-gray-200 text-gray-800'
+                  message.type === "user"
+                    ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white"
+                    : message.type === "system"
+                    ? "bg-black/10 text-gray-600 text-xs"
+                    : "bg-white border border-gray-200 text-gray-800"
                 }`}
               >
                 {message.content}
               </div>
             </div>
           ))}
-          
+
           {/* Current Streaming Response */}
           {currentResponse && (
             <div className="text-left animate-in slide-in-from-bottom duration-300">
@@ -605,23 +708,29 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
               </div>
             </div>
           )}
-          
+
           {/* Typing Indicator */}
           {isTyping && !currentResponse && (
             <div className="text-left animate-in slide-in-from-bottom duration-300">
               <div className="inline-block bg-white border border-gray-200 p-3 rounded-2xl">
                 <div className="flex gap-1">
                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  <div
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "0.1s" }}
+                  ></div>
+                  <div
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "0.2s" }}
+                  ></div>
                 </div>
               </div>
             </div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </div>
-        
+
         {/* Input Area */}
         <div className="p-5 bg-white border-t border-gray-200 flex gap-3 items-end">
           <div className="flex-1">
@@ -629,7 +738,7 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   if (!hasActiveSession) {
                     startSession();
@@ -638,7 +747,11 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
                   }
                 }
               }}
-              placeholder={hasActiveSession ? "Type your message here..." : "Type your first message to start session..."}
+              placeholder={
+                hasActiveSession
+                  ? "Type your message here..."
+                  : "Type your first message to start session..."
+              }
               disabled={!isConnected || isTyping}
               className="w-full min-h-[44px] max-h-32 p-3 border-2 border-gray-200 rounded-3xl text-sm resize-none outline-none focus:border-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             />
@@ -651,13 +764,60 @@ const [shouldReconnect, setShouldReconnect] = useState(false);
             ➤
           </button>
         </div>
-        
+
         {/* Stats */}
         <div className="p-3 bg-black/5 text-xs text-gray-600 flex justify-between items-center">
           <span>Tokens: {totalTokens}</span>
-          <span>Session: {hasActiveSession ? 'Active' : 'Inactive'}</span>
-          <span>Status: {isTyping ? 'Waiting for response...' : 'Ready'}</span>
+          <span>Session: {hasActiveSession ? "Active" : "Inactive"}</span>
+          <span>Status: {isTyping ? "Waiting for response..." : "Ready"}</span>
+          <br />
+          <span>
+            Distress Score:{" "}
+            {distressScore !== null ? `${distressScore} / 10` : "N/A"}
+          </span>
         </div>
+      </div>
+
+      <div className="flex items-center gap-4 p-4">
+        <button
+          onClick={() => setEmotionDetectionEnabled((v) => !v)}
+          className={`px-4 py-2 rounded-lg font-semibold ${
+            emotionDetectionEnabled
+              ? "bg-green-500 text-white"
+              : "bg-gray-300 text-gray-700"
+          }`}
+        >
+          {emotionDetectionEnabled
+            ? "Stop Emotion Detection"
+            : "Start Emotion Detection"}
+        </button>
+        {emotionDetectionEnabled && (
+          <>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              width={96}
+              height={96}
+              className="rounded-full border-2 border-blue-400 shadow"
+            />
+            <canvas
+              ref={canvasRef}
+              width={224}
+              height={224}
+              className="hidden"
+            />
+            <div>
+              <div className="text-lg font-semibold">
+                Current Emotion:{" "}
+                <span className="font-bold">{emotion.current}</span>
+              </div>
+              <div className="text-sm text-gray-500">
+                Aggregated: {emotion.aggregated}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
