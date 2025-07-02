@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import TherapistBookingABI from '../contracts/TherapistBooking.json'; // This will be in build/contracts after compilation
+// import TherapistBookingABI from '../contracts/TherapistBooking.json'; // This will be in build/contracts after compilation
 
 
 class BlockchainService {
