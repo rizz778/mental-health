@@ -158,15 +158,6 @@ async def websocket_endpoint(
                                     for part in turn.get("parts", []):
                                         user_messages.append({"type": "user", "content": part.get("text", "")})
 
-                            async def send_distress_score():
-                                score = await distress_service.calculate_distress_score(user_messages)
-                                if score is not None:
-                                    await websocket.send_json({
-                                            "type": "distress_score",
-                                            "score": score
-                                        })
-
-                            asyncio.create_task(send_distress_score())
                         else:
                             logger.error(f"[WebSocket] No text session available for {client_id}")
                             await websocket.send_json({"error": "Text session not available"})
@@ -174,7 +165,7 @@ async def websocket_endpoint(
                         logger.error(f"[Gemini] Error sending turns: {e}")
                         await websocket.send_json({"error": f"Failed to send content: {str(e)}"})
                 else:
-                    logger.error(f"[Gemini] Invalid user_turns structure: {pprint.pformat(user_turns)}")
+                    logger.error(f"[Gemini] Invalid user_turns structure: {print.pformat(user_turns)}")
                     await websocket.send_json({"error": "Invalid message format for Gemini"}) 
                         
             elif "frame" in data:

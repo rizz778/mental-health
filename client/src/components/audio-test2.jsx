@@ -225,7 +225,7 @@ const GeminiAudioChat = () => {
           type: "setup",
           config: {
             model: "models/gemini-2.5-flash-preview-native-audio-dialog",
-            response_modalities: ["AUDIO", "TEXT"],
+            response_modalities: ["AUDIO"],
             voice_name: "Puck",
           },
         };
