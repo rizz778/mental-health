@@ -30,11 +30,27 @@ def is_valid_turn(turn):
 def get_config_from_setup(setup_data, default_model):
     print("[DEBUG] setup_data received:", setup_data)
     model = setup_data.get("model", default_model)
+    systemContext = setup_data.get("systemContext")
     config = setup_data.get("generationConfig", {"responseModalities": ["TEXT"]})
     system_instruction = setup_data.get("systemInstruction")
     tools = setup_data.get("tools")
     session_resumption = setup_data.get("sessionResumption")
     gemini_config = dict(config)
+
+    # Compose system instruction with user profile and conversation history if present
+    if systemContext:
+        user_profile = systemContext.get("user_profile")
+        conversation_history = systemContext.get("conversation_history")
+        profile_str = f"User profile: {json.dumps(user_profile)}. " if user_profile else ""
+        history_str = ""
+        if conversation_history:
+            # Only include last 5 messages for brevity
+            last_msgs = conversation_history[-5:]
+            history_str = "Conversation so far: " + " ".join(
+                f"[{msg.get('sender','')}: {msg.get('text','')}]" for msg in last_msgs
+            )
+        system_instruction = f"{profile_str}{history_str} {system_instruction or ''}".strip()
+
     if system_instruction:
         gemini_config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
     if tools:
@@ -78,7 +94,7 @@ async def websocket_endpoint(
                 response_modalities = gemini_config.get("responseModalities", ["TEXT"])
                 
                 if "TEXT" in response_modalities:
-                    session, session_cm = await gemini_service.start_session(gemini_config, model=model)
+                    session, session_cm = await gemini_service.start_session(gemini_config,model=model)
                     active_sessions[client_id] = {
                         "session": session,
                         "session_cm": session_cm,

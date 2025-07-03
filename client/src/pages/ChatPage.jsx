@@ -24,12 +24,15 @@ import {
   AudioOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
+import axios from "axios";
 
 const { Header, Sider, Content } = Layout;
 
 // Backend URLs
 const NODE_BACKEND_URL = "http://localhost:4000"; // Node.js backend (user profile, chat history, saving results)
 const GEMINI_BACKEND_URL = "http://localhost:8000"; // Gemini backend (chat, emotion, distress scoring)
+
+const BACKEND_URL = NODE_BACKEND_URL;
 
 const ChatPage = () => {
   // Connection state
@@ -62,15 +65,7 @@ const ChatPage = () => {
   const canvasRef = useRef(null);
 
   // Messages and input
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      type: "system",
-      content: "Welcome to Live API Chat Demo! Connect to the WebSocket server and start a session to begin chatting.",
-      sender: "system",
-      text: "Welcome to Live API Chat Demo! Connect to the WebSocket server and start a session to begin chatting.",
-    },
-  ]);
+  const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState("");
   const [currentResponse, setCurrentResponse] = useState("");
   const currentResponseRef = useRef("");
@@ -210,27 +205,55 @@ const ChatPage = () => {
       }, 500);
     }
   }, [shouldReconnect, resumeHandle]);
+const fetchSessions = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.get(
+        `${BACKEND_URL}/api/chat/sessions`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      setChatSessions(response.data);
+      const savedSession = localStorage.getItem("activeSession");
+      const validSession = response.data.find(
+        (session) => session._id === savedSession
+      );
 
+      if (validSession) {
+        setActiveSession(savedSession);
+      } else if (response.data.length > 0) {
+        setActiveSession(response.data[0]._id);
+        localStorage.setItem("activeSession", response.data[0]._id);
+      } else {
+        const newSession = await axios.post(
+          `${BACKEND_URL}/api/chat/sessions`,
+          { sessionName: "Session 1" },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setChatSessions([newSession.data]);
+        setActiveSession(newSession.data._id);
+        localStorage.setItem("activeSession", newSession.data._id);
+      }
+    } catch (error) {
+      antdMessage.error("Failed to fetch chat sessions.");
+      console.error("Failed to fetch sessions:", error);
+    }
+  };
+
+  // Remove mock chat sessions and frontend-generated session IDs
   // Initialize chat sessions on mount
   useEffect(() => {
-    const initializeSessions = () => {
-      // Mock chat sessions - replace with actual API call
-      const mockSessions = [
-        { _id: "session1", sessionName: "General Chat" },
-        { _id: "session2", sessionName: "Support Chat" },
-      ];
-      setChatSessions(mockSessions);
-      
-      const savedActiveSession = localStorage.getItem("activeSession");
-      if (savedActiveSession) {
-        setActiveSession(savedActiveSession);
-      } else if (mockSessions.length > 0) {
-        setActiveSession(mockSessions[0]._id);
-      }
-    };
+    fetchSessions(); // Only fetch from backend
+  }, [fetchSessions]);
 
-    initializeSessions();
-  }, []);
+  // When switching sessions, fetch messages from backend
+  useEffect(() => {
+    if (activeSession) {
+      fetchMessages(activeSession);
+      localStorage.setItem("activeSession", activeSession);
+    }
+  }, [activeSession]);
 
   // WebSocket message handler
   const handleServerMessage = useCallback((data) => {
@@ -270,7 +293,7 @@ const ChatPage = () => {
               saveMessage(activeSession, {
                 sender: 'user',
                 type: 'user',
-                content: lastUserMsg.content,
+                text: lastUserMsg.content,
                 emotion: emotion.current,
                 distress: distressScore,
                 timestamp: lastUserMsg.timestamp,
@@ -282,7 +305,7 @@ const ChatPage = () => {
           if (activeSession) {
             saveMessage(activeSession, {
               type: 'model',
-              content: currentResponseRef.current,
+              text: currentResponseRef.current,
               timestamp: new Date().toISOString(),
             });
           }
@@ -309,7 +332,7 @@ const ChatPage = () => {
       case "setup_complete":
         console.log('setup complete!!!');
         setHasActiveSession(true);
-        addSystemMessage("Session setup complete - You can now send messages");
+        // addSystemMessage("Session setup complete - You can now send messages"); // Removed per user request
         break;
       case "session_ended":
         setHasActiveSession(false);
@@ -335,7 +358,7 @@ const ChatPage = () => {
               saveMessage(activeSession, {
                 sender: 'user',
                 type: 'user',
-                content: lastUserMsg.content,
+                text: lastUserMsg.content,
                 emotion: emotion.current,
                 distress: distressScore,
                 timestamp: lastUserMsg.timestamp,
@@ -347,7 +370,7 @@ const ChatPage = () => {
           if (activeSession) {
             saveMessage(activeSession, {
               type: 'model',
-              content: currentResponseRef.current,
+              text: currentResponseRef.current,
               timestamp: new Date().toISOString(),
             });
           }
@@ -399,7 +422,7 @@ const ChatPage = () => {
   const formatText = (text) => {
     return text?.replace(/\n/g, '<br/>') || '';
   };
-
+ 
   // Helper functions
   const addMessage = (type, content) => {
     if (type !== "user" && type !== "model" && type !== "system") return;
@@ -665,54 +688,22 @@ const ChatPage = () => {
   };
 
   // Fetch chat sessions from Node backend
-  const fetchSessions = useCallback(async () => {
-    try {
-      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions`, {
-        headers: {
-          ...getAuthHeaders(),
-        },
-      });
-      const data = await res.json();
-      setChatSessions(data.sessions || []);
-      if (data.sessions && data.sessions.length > 0) {
-        const savedActiveSession = localStorage.getItem("activeSession");
-        if (savedActiveSession && data.sessions.find(s => s._id === savedActiveSession)) {
-          setActiveSession(savedActiveSession);
-        } else {
-          setActiveSession(data.sessions[0]._id);
-        }
-      }
-    } catch (err) {
-      showError("Failed to fetch sessions");
-      setChatSessions([]);
-    }
-  }, []);
-
+  
   // Create a new session in Node backend
   const createSession = async () => {
     try {
-      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify({ sessionName: `Chat ${chatSessions.length + 1}` })
-      });
-      const data = await res.json();
-      if (data.session) {
-        setChatSessions(prev => [...prev, data.session]);
-        setActiveSession(data.session._id);
-        localStorage.setItem("activeSession", data.session._id);
-        setMessages([{
-          id: 1,
-          type: "system",
-          content: "New chat session started!",
-          sender: "system",
-          text: "New chat session started!",
-        }]);
-        messageIdRef.current = 2;
-      }
+      const token = localStorage.getItem("token");
+      const response = await axios.post(
+        `${BACKEND_URL}/api/chat/sessions`,
+        { sessionName: `Chat ${chatSessions.length + 1}` },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const newSession = response.data;
+      await fetchSessions(); // Refresh session list immediately
+      setActiveSession(newSession._id);
+      localStorage.setItem("activeSession", newSession._id);
+      setMessages([]); // No system message on new session
+      messageIdRef.current = 2;
     } catch (err) {
       showError("Failed to create session");
     }
@@ -728,12 +719,23 @@ const ChatPage = () => {
       });
       const data = await res.json();
       if (data.messages) {
-        setMessages(data.messages.map((msg, idx) => ({
-          ...msg,
-          id: idx + 1,
-          sender: msg.type === 'user' ? 'user' : msg.type === 'model' ? 'bot' : 'system',
-          text: msg.content,
-        })));
+        setMessages(data.messages.map((msg, idx) => {
+          // Robustly map backend message fields to UI format
+          let sender = 'system';
+          if (msg.sender === 'user' || msg.type === 'user') sender = 'user';
+          else if (msg.sender === 'bot' || msg.type === 'model') sender = 'bot';
+          // Prefer 'text', fallback to 'content', fallback to empty string
+          const text = typeof msg.text === 'string' && msg.text.trim() !== ''
+            ? msg.text
+            : (typeof msg.content === 'string' ? msg.content : '');
+          return {
+            ...msg,
+            id: idx + 1,
+            sender,
+            text,
+            content: text, // for compatibility
+          };
+        }));
         messageIdRef.current = data.messages.length + 1;
       } else {
         setMessages([]);
@@ -792,20 +794,25 @@ const ChatPage = () => {
     const secondLast = messages[messages.length - 2];
     if (secondLast.type === 'user' && last.type === 'model') {
       // Save user message
-      saveMessage(activeSession, {
-        sender:"user",
-        type: 'user',
-        content: secondLast.content,
-        emotion: emotion.current,
-        distress: distressScore,
-        timestamp: secondLast.timestamp,
-      });
-      // Save model message
-      saveMessage(activeSession, {
-        type: 'model',
-        content: last.content,
-        timestamp: last.timestamp,
-      });
+      if (secondLast.content && secondLast.content.trim() !== "") {
+        saveMessage(activeSession, {
+          sender: "user",
+          type: 'user',
+          text: secondLast.content,
+          emotion: emotion.current,
+          distress: distressScore,
+          timestamp: secondLast.timestamp,
+        });
+      }
+      // Save model message (must have sender and non-empty content)
+      if (last.content && last.content.trim() !== "") {
+        saveMessage(activeSession, {
+          sender: "bot",
+          type: 'model',
+          text: last.content,
+          timestamp: last.timestamp,
+        });
+      }
     }
   }, [messages, activeSession, emotion.current, distressScore]);
 
@@ -818,18 +825,59 @@ const ChatPage = () => {
     showSuccess("Settings updated");
   };
 
-  // Gemini session setup with context
+  // Fetch user profile from backend
+  const fetchUserProfile = async () => {
+    try {
+      const res = await fetch(`${NODE_BACKEND_URL}/api/profile`, {
+        headers: { ...getAuthHeaders() },
+      });
+      if (!res.ok) throw new Error('Failed to fetch user profile');
+      return await res.json();
+    } catch (err) {
+      console.error('Error fetching user profile:', err);
+      return null;
+    }
+  };
+
+  // Fetch previous messages for a session
+  const fetchSessionMessages = async (sessionId) => {
+    try {
+      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}`, {
+        headers: { ...getAuthHeaders() },
+      });
+      if (!res.ok) throw new Error('Failed to fetch session messages');
+      const data = await res.json();
+      return data.messages || [];
+    } catch (err) {
+      console.error('Error fetching session messages:', err);
+      return [];
+    }
+  };
+
+  // Gemini session setup with context (now async, fetches user profile and session messages)
   const setupGeminiSession = useCallback(async (sessionId) => {
     try {
-      // Mock implementation - replace with actual API calls
-      const userProfile = { name: "User", preferences: "helpful assistant" };
-      const conversationHistory = [];
-      
+      // Fetch user profile and previous messages from backend
+      const [userProfile, sessionMessages] = await Promise.all([
+        fetchUserProfile(),
+        fetchSessionMessages(sessionId)
+      ]);
+
+      // Prepare conversation history for Gemini
+      const conversation_history = (sessionMessages || []).map((msg) => ({
+        sender: msg.sender,
+        type: msg.type,
+        text: msg.text || msg.content || '',
+        timestamp: msg.timestamp,
+        emotion: msg.emotion,
+        distress: msg.distress,
+      }));
+
       const systemContext = {
         user_profile: userProfile,
-        conversation_history: conversationHistory
+        conversation_history,
       };
-      
+
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           setup: {
@@ -1029,7 +1077,7 @@ const ChatPage = () => {
                   ) : (
                     <div
                       dangerouslySetInnerHTML={{
-                        __html: formatText(msg.text || msg.content),
+                        __html: formatText(msg.text || msg.content || ''),
                       }}
                     />
                   )}
