@@ -105,6 +105,7 @@ async def websocket_endpoint(
         
         while True:
             msg = await websocket.receive_text()
+            logger.info(f"[WebSocket] Raw message received: {msg}")
             logger.info(f"[WebSocket] Received message: {msg}")
             
             try:
@@ -119,8 +120,6 @@ async def websocket_endpoint(
             
             message_type = data.get("type")
             
-            # ...existing code...
-
             if "clientContent" in data:
                 user_turns = data["clientContent"].get("turns", [])
                 turn_complete = data["clientContent"].get("turnComplete", True)
@@ -168,6 +167,9 @@ async def websocket_endpoint(
                     logger.error(f"[Gemini] Invalid user_turns structure: {print.pformat(user_turns)}")
                     await websocket.send_json({"error": "Invalid message format for Gemini"}) 
                         
+            elif data.get("type") == "setup":
+                # Accept setup messages for emotion-only websocket clients
+                await websocket.send_json({"type": "setup_complete"})
             elif "frame" in data:
                 try:
                     frame_b64 = data["frame"]

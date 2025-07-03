@@ -94,113 +94,224 @@ class GeminiService:
                 active_sessions[client_id] = {}
             
             while True:
-                response = await session.receive()
-                logger.info(f"[GeminiService] Received from Gemini: {response}")
-                
-                # Defensive: If response is bytes, decode to string
-                if isinstance(response, bytes):
-                    response_str = response.decode('utf-8', errors='replace')
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "error",
-                        "message": f"Unexpected Gemini API response: {response_str}"
-                    })
-                    continue
-                    
-                # Defensive: If response is a string, log and skip
-                elif isinstance(response, str):
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "error",
-                        "message": f"Unexpected Gemini API response: {str(response)}"
-                    })
-                    continue
-                
-                # Print for all message types
-                elif hasattr(response, "session_resumption_update") and response.session_resumption_update:
-                    handle = response.session_resumption_update.new_handle
-                    resumable = response.session_resumption_update.resumable
-                    
-                    # FIXED: Double-check that active_sessions[client_id] is still a dict before accessing
-                    if not isinstance(active_sessions.get(client_id), dict):
-                        active_sessions[client_id] = {}
-                    
-                    active_sessions[client_id]["session_handle"] = handle
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "session_resumption_update",
-                        "handle": handle,
-                        "resumable": resumable
-                    })
-                
-                elif getattr(response, "go_away", None):
-                    print(f"[GeminiService] Received go_away for {client_id}: {response.go_away}")
-                    
-                    # FIXED: More robust handling of session_handle access
-                    session_handle = None
-                    client_data = active_sessions.get(client_id)
-                    if isinstance(client_data, dict):
-                        session_handle = client_data.get("session_handle")
-                    else:
-                        pass
-                    
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "session_warning",
-                        "message": f"Session ending in: {getattr(response.go_away, 'time_left', None)}",
-                        "go_away": str(response.go_away),
-                        "resume_handle": session_handle
-                    })
-                
-                elif getattr(response, "text", None) is not None:
-                    print(f"[GeminiService] Received text for {client_id}: {response.text}")
-                    print(response.text)
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "text_chunk",
-                        "content": response.text,
-                        "complete": False
-                    })
-                
-                elif getattr(response, "server_content", None):
-                    if response.server_content.generation_complete:
-                        await self._safe_websocket_send(websocket, client_id, {
-                            "type": "generation_complete",
-                            "message": "Response generation completed"
-                    })
-                    # --- Forced reconnect/heartbeat logic removed ---
-                    # Only reconnect if go_away or error occurs
-                    if response.server_content.interrupted:
-                        await self._safe_websocket_send(websocket, client_id, {
-                            "type": "interrupted",
-                            "message": "Generation was interrupted"
-                    })
-                
-                elif hasattr(response, 'tool_call') and response.tool_call:
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "tool_call",
-                        "tool_call": str(response.tool_call)
-                    })
-                
-                elif getattr(response, "usage_metadata", None):
-                    usage = response.usage_metadata
-                    # Convert usage details to JSON-serializable format
-                    details = []
-                    for detail in getattr(usage, 'response_tokens_details', []):
-                        modality = getattr(detail, 'modality', 'unknown')
-                        # Convert enum to string if it's an enum
-                        if hasattr(modality, 'value'):
-                            modality = modality.value
-                        elif hasattr(modality, 'name'):
-                            modality = modality.name
-                        else:
-                            modality = str(modality)
+                # If session.receive is an async generator, use async for
+                response_gen = session.receive()
+                if hasattr(response_gen, "__aiter__"):
+                    async for response in response_gen:
+                        logger.info(f"[GeminiService] Received from Gemini: {response}")
                         
-                        details.append({
-                            "modality": modality,
-                            "token_count": getattr(detail, 'token_count', 0)
+                        # Defensive: If response is bytes, decode to string
+                        if isinstance(response, bytes):
+                            response_str = response.decode('utf-8', errors='replace')
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "error",
+                                "message": f"Unexpected Gemini API response: {response_str}"
+                            })
+                            continue
+                            
+                        # Defensive: If response is a string, log and skip
+                        elif isinstance(response, str):
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "error",
+                                "message": f"Unexpected Gemini API response: {str(response)}"
+                            })
+                            continue
+                        
+                        # Print for all message types
+                        elif hasattr(response, "session_resumption_update") and response.session_resumption_update:
+                            handle = response.session_resumption_update.new_handle
+                            resumable = response.session_resumption_update.resumable
+                            
+                            # FIXED: Double-check that active_sessions[client_id] is still a dict before accessing
+                            if not isinstance(active_sessions.get(client_id), dict):
+                                active_sessions[client_id] = {}
+                            
+                            active_sessions[client_id]["session_handle"] = handle
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "session_resumption_update",
+                                "handle": handle,
+                                "resumable": resumable
+                            })
+                        
+                        elif getattr(response, "go_away", None):
+                            print(f"[GeminiService] Received go_away for {client_id}: {response.go_away}")
+                            
+                            # FIXED: More robust handling of session_handle access
+                            session_handle = None
+                            client_data = active_sessions.get(client_id)
+                            if isinstance(client_data, dict):
+                                session_handle = client_data.get("session_handle")
+                            else:
+                                pass
+                            
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "session_warning",
+                                "message": f"Session ending in: {getattr(response.go_away, 'time_left', None)}",
+                                "go_away": str(response.go_away),
+                                "resume_handle": session_handle
+                            })
+                        
+                        elif getattr(response, "text", None) is not None:
+                            print(f"[GeminiService] Received text for {client_id}: {response.text}")
+                            print(response.text)
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "text_chunk",
+                                "content": response.text,
+                                "complete": False
+                            })
+                        
+                        elif getattr(response, "server_content", None):
+                            if response.server_content.generation_complete:
+                                await self._safe_websocket_send(websocket, client_id, {
+                                    "type": "generation_complete",
+                                    "message": "Response generation completed"
+                            })
+                            # --- Forced reconnect/heartbeat logic removed ---
+                            # Only reconnect if go_away or error occurs
+                            if response.server_content.interrupted:
+                                await self._safe_websocket_send(websocket, client_id, {
+                                    "type": "interrupted",
+                                    "message": "Generation was interrupted"
+                            })
+                        
+                        elif hasattr(response, 'tool_call') and response.tool_call:
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "tool_call",
+                                "tool_call": str(response.tool_call)
+                            })
+                        
+                        elif getattr(response, "usage_metadata", None):
+                            usage = response.usage_metadata
+                            # Convert usage details to JSON-serializable format
+                            details = []
+                            for detail in getattr(usage, 'response_tokens_details', []):
+                                modality = getattr(detail, 'modality', 'unknown')
+                                # Convert enum to string if it's an enum
+                                if hasattr(modality, 'value'):
+                                    modality = modality.value
+                                elif hasattr(modality, 'name'):
+                                    modality = modality.name
+                                else:
+                                    modality = str(modality)
+                                
+                                details.append({
+                                    "modality": modality,
+                                    "token_count": getattr(detail, 'token_count', 0)
+                                })
+                            
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "usage_update",
+                                "total_tokens": usage.total_token_count,
+                                "details": details
+                            })
+                else:
+                    response = await session.receive()
+                    logger.info(f"[GeminiService] Received from Gemini: {response}")
+                    
+                    # Defensive: If response is bytes, decode to string
+                    if isinstance(response, bytes):
+                        response_str = response.decode('utf-8', errors='replace')
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "error",
+                            "message": f"Unexpected Gemini API response: {response_str}"
+                        })
+                        continue
+                        
+                    # Defensive: If response is a string, log and skip
+                    elif isinstance(response, str):
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "error",
+                            "message": f"Unexpected Gemini API response: {str(response)}"
+                        })
+                        continue
+                    
+                    # Print for all message types
+                    elif hasattr(response, "session_resumption_update") and response.session_resumption_update:
+                        handle = response.session_resumption_update.new_handle
+                        resumable = response.session_resumption_update.resumable
+                        
+                        # FIXED: Double-check that active_sessions[client_id] is still a dict before accessing
+                        if not isinstance(active_sessions.get(client_id), dict):
+                            active_sessions[client_id] = {}
+                        
+                        active_sessions[client_id]["session_handle"] = handle
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "session_resumption_update",
+                            "handle": handle,
+                            "resumable": resumable
                         })
                     
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "usage_update",
-                        "total_tokens": usage.total_token_count,
-                        "details": details
-                    })
+                    elif getattr(response, "go_away", None):
+                        print(f"[GeminiService] Received go_away for {client_id}: {response.go_away}")
+                        
+                        # FIXED: More robust handling of session_handle access
+                        session_handle = None
+                        client_data = active_sessions.get(client_id)
+                        if isinstance(client_data, dict):
+                            session_handle = client_data.get("session_handle")
+                        else:
+                            pass
+                        
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "session_warning",
+                            "message": f"Session ending in: {getattr(response.go_away, 'time_left', None)}",
+                            "go_away": str(response.go_away),
+                            "resume_handle": session_handle
+                        })
+                    
+                    elif getattr(response, "text", None) is not None:
+                        print(f"[GeminiService] Received text for {client_id}: {response.text}")
+                        print(response.text)
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "text_chunk",
+                            "content": response.text,
+                            "complete": False
+                        })
+                    
+                    elif getattr(response, "server_content", None):
+                        if response.server_content.generation_complete:
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "generation_complete",
+                                "message": "Response generation completed"
+                        })
+                        # --- Forced reconnect/heartbeat logic removed ---
+                        # Only reconnect if go_away or error occurs
+                        if response.server_content.interrupted:
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "interrupted",
+                                "message": "Generation was interrupted"
+                        })
+                    
+                    elif hasattr(response, 'tool_call') and response.tool_call:
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "tool_call",
+                            "tool_call": str(response.tool_call)
+                        })
+                    
+                    elif getattr(response, "usage_metadata", None):
+                        usage = response.usage_metadata
+                        # Convert usage details to JSON-serializable format
+                        details = []
+                        for detail in getattr(usage, 'response_tokens_details', []):
+                            modality = getattr(detail, 'modality', 'unknown')
+                            # Convert enum to string if it's an enum
+                            if hasattr(modality, 'value'):
+                                modality = modality.value
+                            elif hasattr(modality, 'name'):
+                                modality = modality.name
+                            else:
+                                modality = str(modality)
+                            
+                            details.append({
+                                "modality": modality,
+                                "token_count": getattr(detail, 'token_count', 0)
+                            })
+                        
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "usage_update",
+                            "total_tokens": usage.total_token_count,
+                            "details": details
+                        })
         except Exception as e:
             # Try to send error message with extra safety
             error_message = str(e)

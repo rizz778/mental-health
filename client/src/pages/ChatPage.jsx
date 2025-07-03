@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Layout,
@@ -102,36 +101,78 @@ const ChatPage = () => {
 
   const [distressScore, setDistressScore] = useState(null);
 
-  // Emotion detection effect
+  // Emotion detection effect (Webcam + Gemini emotion via WebSocket)
   useEffect(() => {
     if (!emotionDetectionEnabled) return;
+    let ws;
     let interval;
+    let stream;
+    let isMounted = true;
+
+    // Open a dedicated WebSocket for emotion detection
+    ws = new WebSocket("ws://localhost:8000");
+
+    ws.onopen = () => {
+      console.log("[Emotion] WebSocket connected");
+      ws.send(JSON.stringify({ setup: {} }));
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.emotion) {
+        setEmotion(data.emotion);
+        // console.log("[Emotion] Current:", data.emotion.current, "Aggregated:", data.emotion.aggregated);
+      } else if (data.setupComplete) {
+        console.log("[Emotion] Setup complete");
+      } else {
+        console.warn("[Emotion] Unknown message:", data);
+      }
+    };
+
+    ws.onerror = (err) => console.error("[Emotion] WebSocket error:", err);
+    ws.onclose = () => console.warn("[Emotion] WebSocket closed");
+
+    // Start webcam
     navigator.mediaDevices
       .getUserMedia({ video: true })
-      .then((stream) => {
+      .then((mediaStream) => {
+        stream = mediaStream;
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+          videoRef.current.srcObject = mediaStream;
         }
         interval = setInterval(() => {
-          const ws = wsRef.current;
-          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          if (!ws || ws.readyState !== WebSocket.OPEN){
+            console.log("WebSocket not open");
+            return;
+          }
           const canvas = canvasRef.current;
           const video = videoRef.current;
+           if (!canvas) {
+            console.log("Canvas not available");
+            return;
+          }
+          if (!video) {
+    console.log("Video not available");
+    return;
+  }
           if (canvas && video) {
             const ctx = canvas.getContext("2d");
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const dataURL = canvas.toDataURL("image/jpeg");
             const base64 = dataURL.split(",")[1];
+            // console.log("Frame sent")
             ws.send(JSON.stringify({ frame: base64 }));
           }
         }, 1000);
       })
-      .catch((err) => console.error("Error accessing webcam:", err));
+      .catch((err) => console.error("[Emotion] Error accessing webcam:", err));
 
     return () => {
+      isMounted = false;
       if (interval) clearInterval(interval);
-      if (videoRef.current && videoRef.current.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+      if (ws) ws.close();
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
       }
     };
   }, [emotionDetectionEnabled]);
@@ -222,7 +263,29 @@ const ChatPage = () => {
       }
       if (data.serverContent.generationComplete) {
         if (currentResponseRef.current) {
+          // Save user message before model message
+          if (activeSession && messages.length > 0) {
+            const lastUserMsg = messages[messages.length - 1];
+            if (lastUserMsg.type === 'user') {
+              saveMessage(activeSession, {
+                sender: 'user',
+                type: 'user',
+                content: lastUserMsg.content,
+                emotion: emotion.current,
+                distress: distressScore,
+                timestamp: lastUserMsg.timestamp,
+              });
+            }
+          }
           addMessage("model", currentResponseRef.current);
+          // Save model message to backend after each model response
+          if (activeSession) {
+            saveMessage(activeSession, {
+              type: 'model',
+              content: currentResponseRef.current,
+              timestamp: new Date().toISOString(),
+            });
+          }
         }
         setCurrentResponse("");
         currentResponseRef.current = "";
@@ -234,12 +297,6 @@ const ChatPage = () => {
       return;
     }
     
-    if (data.setupComplete !== undefined) {
-      setHasActiveSession(true);
-      addSystemMessage("Session setup complete - You can now send messages");
-      return;
-    }
-    
     switch (data.type) {
       case "connection_established":
         showSuccess(data.message || "Connected to Live API Bridge");
@@ -248,6 +305,11 @@ const ChatPage = () => {
         setHasActiveSession(true);
         showSuccess("Session started successfully");
         addSystemMessage("Session started - You can now send messages");
+        break;
+      case "setup_complete":
+        console.log('setup complete!!!');
+        setHasActiveSession(true);
+        addSystemMessage("Session setup complete - You can now send messages");
         break;
       case "session_ended":
         setHasActiveSession(false);
@@ -266,7 +328,29 @@ const ChatPage = () => {
       case "generation_complete":
         setIsTyping(false);
         if (currentResponseRef.current) {
+          // Save user message before model message
+          if (activeSession && messages.length > 0) {
+            const lastUserMsg = messages[messages.length - 1];
+            if (lastUserMsg.type === 'user') {
+              saveMessage(activeSession, {
+                sender: 'user',
+                type: 'user',
+                content: lastUserMsg.content,
+                emotion: emotion.current,
+                distress: distressScore,
+                timestamp: lastUserMsg.timestamp,
+              });
+            }
+          }
           addMessage("model", currentResponseRef.current);
+          // Save model message to backend after each model response
+          if (activeSession) {
+            saveMessage(activeSession, {
+              type: 'model',
+              content: currentResponseRef.current,
+              timestamp: new Date().toISOString(),
+            });
+          }
         }
         setCurrentResponse("");
         currentResponseRef.current = "";
@@ -310,6 +394,11 @@ const ChatPage = () => {
         console.log("[Client] Unhandled message type:", data.type, data);
     }
   }, []);
+
+  // Simple text formatting function
+  const formatText = (text) => {
+    return text?.replace(/\n/g, '<br/>') || '';
+  };
 
   // Helper functions
   const addMessage = (type, content) => {
@@ -452,6 +541,7 @@ const ChatPage = () => {
   const analyzeDistressScore = async (inputText) => {
     if (!inputText || inputText.trim() === '') return;
     try {
+      console.log('[Distress] Sending text for distress score:', inputText); // Log input
       const response = await fetch(`${GEMINI_BACKEND_URL}/api/distress-score`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -460,9 +550,14 @@ const ChatPage = () => {
       if (!response.ok) throw new Error('API error');
       const data = await response.json();
       setDistressScore(data.score);
-      console.log(data.score);
+      // Log distress score and emotion immediately after update
+      setTimeout(() => {
+        console.log('[Distress] API response:', data); // Log full API response
+        console.log('[Distress] Distress score for message:', data.score);
+        console.log('[Distress] Emotion for message:', emotion.current);
+      }, 0);
     } catch (err) {
-      console.error('Distress score analysis failed', err);
+      console.error('[Distress] Distress score analysis failed', err);
     }
   };
 
@@ -490,7 +585,7 @@ const ChatPage = () => {
     sendToServer(payload);
 
     addMessage("user", message);
-    // analyzeDistressScore(message);hee
+    analyzeDistressScore(message);
     setMessageInput("");
     setInput("");
     setIsTyping(true);
@@ -519,7 +614,10 @@ const ChatPage = () => {
       },
     };
 
-    console.log("[Client] Starting session with payload:", payload);
+    // Only log for the very first session start
+    if (!hasActiveSession) {
+      console.log("[Client] Starting session with payload:", payload);
+    }
     sendToServer(payload);
 
     addMessage("user", message);
@@ -560,64 +658,167 @@ const ChatPage = () => {
     }
   };
 
-  const handleNewSession = () => {
-    const newSessionId = `session_${Date.now()}`;
-    const newSession = {
-      _id: newSessionId,
-      sessionName: `Chat ${chatSessions.length + 1}`,
-    };
-    setChatSessions(prev => [...prev, newSession]);
-    setActiveSession(newSessionId);
-    localStorage.setItem("activeSession", newSessionId);
-    setMessages([{
-      id: 1,
-      type: "system",
-      content: "New chat session started!",
-      sender: "system",
-      text: "New chat session started!",
-    }]);
-    messageIdRef.current = 2;
+  // Helper to get auth headers
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem("token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
-  const fetchMessages = (sessionId) => {
-    // Mock function - replace with actual API call
-    console.log("Fetching messages for session:", sessionId);
-    setMessages([{
-      id: 1,
-      type: "system",
-      content: `Messages loaded for session: ${sessionId}`,
-      sender: "system",
-      text: `Messages loaded for session: ${sessionId}`,
-    }]);
-    messageIdRef.current = 2;
-  };
+  // Fetch chat sessions from Node backend
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions`, {
+        headers: {
+          ...getAuthHeaders(),
+        },
+      });
+      const data = await res.json();
+      setChatSessions(data.sessions || []);
+      if (data.sessions && data.sessions.length > 0) {
+        const savedActiveSession = localStorage.getItem("activeSession");
+        if (savedActiveSession && data.sessions.find(s => s._id === savedActiveSession)) {
+          setActiveSession(savedActiveSession);
+        } else {
+          setActiveSession(data.sessions[0]._id);
+        }
+      }
+    } catch (err) {
+      showError("Failed to fetch sessions");
+      setChatSessions([]);
+    }
+  }, []);
 
-  const handleCallUser = () => {
-    console.log("Making call with:", { phoneNumber, userMessage });
-    antdMessage.success("Call initiated!");
-    setIsModalVisible(false);
-    setPhoneNumber("");
-    setUserMessage("");
-  };
-
-  const handlePlayAudio = () => {
-    if (audioUrl) {
-      const audio = new Audio(audioUrl);
-      audio.play();
+  // Create a new session in Node backend
+  const createSession = async () => {
+    try {
+      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ sessionName: `Chat ${chatSessions.length + 1}` })
+      });
+      const data = await res.json();
+      if (data.session) {
+        setChatSessions(prev => [...prev, data.session]);
+        setActiveSession(data.session._id);
+        localStorage.setItem("activeSession", data.session._id);
+        setMessages([{
+          id: 1,
+          type: "system",
+          content: "New chat session started!",
+          sender: "system",
+          text: "New chat session started!",
+        }]);
+        messageIdRef.current = 2;
+      }
+    } catch (err) {
+      showError("Failed to create session");
     }
   };
 
-  const resetTranscript = () => {
-    // Mock function for speech recognition
-    console.log("Transcript reset");
+  // Fetch conversation history for a session from Node backend
+  const fetchMessages = async (sessionId) => {
+    try {
+      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}`, {
+        headers: {
+          ...getAuthHeaders(),
+        },
+      });
+      const data = await res.json();
+      if (data.messages) {
+        setMessages(data.messages.map((msg, idx) => ({
+          ...msg,
+          id: idx + 1,
+          sender: msg.type === 'user' ? 'user' : msg.type === 'model' ? 'bot' : 'system',
+          text: msg.content,
+        })));
+        messageIdRef.current = data.messages.length + 1;
+      } else {
+        setMessages([]);
+        messageIdRef.current = 1;
+      }
+    } catch (err) {
+      showError("Failed to fetch messages");
+      setMessages([]);
+      messageIdRef.current = 1;
+    }
   };
 
-  const formatText = (text) => {
-    // Simple text formatting function
-    return text?.replace(/\n/g, '<br/>') || '';
+  // Save a message to Node backend
+  const saveMessage = async (sessionId, message) => {
+    try {
+      console.log('[saveMessage] Sending to backend:', message);
+      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify(message)
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[saveMessage] Backend responded with status ${res.status}:`, errorText);
+      }
+    } catch (err) {
+      console.error("Failed to save message", err);
+    }
   };
 
-  // Setup Gemini session with context
+  // On mount, fetch sessions from backend
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
+
+  // When switching sessions, fetch messages from backend
+  useEffect(() => {
+    if (activeSession) {
+      fetchMessages(activeSession);
+    }
+  }, [activeSession]);
+
+  // Update handleNewSession to use backend
+  const handleNewSession = () => {
+    createSession();
+  };
+
+  // Save user and model messages to backend after each exchange
+  useEffect(() => {
+    // Only save if last two messages are user and model
+    if (!activeSession || messages.length < 2) return;
+    const last = messages[messages.length - 1];
+    const secondLast = messages[messages.length - 2];
+    if (secondLast.type === 'user' && last.type === 'model') {
+      // Save user message
+      saveMessage(activeSession, {
+        sender:"user",
+        type: 'user',
+        content: secondLast.content,
+        emotion: emotion.current,
+        distress: distressScore,
+        timestamp: secondLast.timestamp,
+      });
+      // Save model message
+      saveMessage(activeSession, {
+        type: 'model',
+        content: last.content,
+        timestamp: last.timestamp,
+      });
+    }
+  }, [messages, activeSession, emotion.current, distressScore]);
+
+  // Emotion detection settings modal
+  const handleConfigSubmit = (values) => {
+    console.log("Config values:", values);
+    setSystemInstruction(values.systemInstruction);
+    setToolsEnabled(values.toolsEnabled);
+    setShowConfig(false);
+    showSuccess("Settings updated");
+  };
+
+  // Gemini session setup with context
   const setupGeminiSession = useCallback(async (sessionId) => {
     try {
       // Mock implementation - replace with actual API calls
@@ -672,7 +873,6 @@ const ChatPage = () => {
     >
       <div style={{ textAlign: 'center', padding: '20px' }}>
         <video ref={videoRef} autoPlay muted style={{ width: '100%', maxWidth: '300px' }} />
-        <canvas ref={canvasRef} style={{ display: 'none' }} width="640" height="480" />
         <p>Current Emotion: {emotion.current || 'None detected'}</p>
         <Button 
           onClick={() => setEmotionDetectionEnabled(!emotionDetectionEnabled)}
@@ -693,6 +893,9 @@ const ChatPage = () => {
 
   return (
     <>
+      {/* Always render the hidden video and canvas for emotion detection */}
+      <video ref={videoRef} style={{ display: 'none' }} autoPlay muted width="640" height="480" />
+      <canvas ref={canvasRef} style={{ display: 'none' }} width="640" height="480" />
       <Layout style={{ height: '100vh' }}>
         <Sider
           width={250}
@@ -766,17 +969,19 @@ const ChatPage = () => {
             <Button
               type="primary"
               icon={<CameraOutlined />}
-              onClick={() => setCameraTestVisible(true)}
+              onClick={() => setEmotionDetectionEnabled((prev) => !prev)}
               style={{
-                backgroundColor: "#4CAF50",
-                borderColor: "#388E3C",
+                backgroundColor: emotionDetectionEnabled ? "#d32f2f" : "#4CAF50",
+                borderColor: emotionDetectionEnabled ? "#b71c1c" : "#388E3C",
                 color: "white",
                 fontWeight: "bold",
                 borderRadius: "8px",
                 height: "40px",
               }}
             >
-              {!collapsed && <span>Capture Emotion</span>}
+              {!collapsed && (
+                <span>{emotionDetectionEnabled ? "Stop Emotion Capture" : "Capture Emotion"}</span>
+              )}
             </Button>
           </div>
         </Sider>
@@ -921,7 +1126,7 @@ const ChatPage = () => {
         </Layout>
       </Layout>
 
-      <Modal
+      {/* <Modal
         title="Make a Call"
         visible={isModalVisible}
         onCancel={() => setIsModalVisible(false)}
@@ -933,8 +1138,8 @@ const ChatPage = () => {
             Call Now
           </Button>,
         ]}
-      >
-        <p>Enter your phone number and message to receive a call:</p>
+      > */}
+        {/* <p>Enter your phone number and message to receive a call:</p>
         <Input
           type="tel"
           placeholder="Enter phone number"
@@ -948,7 +1153,7 @@ const ChatPage = () => {
           onChange={(e) => setUserMessage(e.target.value)}
           style={{ marginTop: "10px" }}
         />
-      </Modal>
+      </Modal> */}
   
   </>
   );
