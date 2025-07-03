@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Layout,
@@ -9,7 +10,6 @@ import {
   notification,
   Modal,
 } from "antd";
-
 import { motion } from "framer-motion";
 import {
   DollarOutlined,
@@ -24,13 +24,8 @@ import {
   SendOutlined,
   AudioOutlined,
 } from "@ant-design/icons";
-import SpeechRecognition, {
-  useSpeechRecognition,
-} from "react-speech-recognition";
-import axios from "axios";
-import "./ChatPage.css";
 import { useNavigate } from "react-router-dom";
-import Loader from "../components/Loader.jsx";
+
 const { Header, Sider, Content } = Layout;
 
 // Backend URLs
@@ -48,11 +43,66 @@ const ChatPage = () => {
   const [toolsEnabled, setToolsEnabled] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [isCameraTestVisible, setCameraTestVisible] = useState(false);
 
+  // Chat state
+  const [chatSessions, setChatSessions] = useState([]);
+  const [activeSession, setActiveSession] = useState(null);
+  const [input, setInput] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [userMessage, setUserMessage] = useState("");
+  const [audioUrl, setAudioUrl] = useState("");
+  const [listening, setListening] = useState(false);
+
+  // Emotion and video refs
   const [emotion, setEmotion] = useState({ current: "", aggregated: "" });
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
+  // Messages and input
+  const [messages, setMessages] = useState([
+    {
+      id: 1,
+      type: "system",
+      content: "Welcome to Live API Chat Demo! Connect to the WebSocket server and start a session to begin chatting.",
+      sender: "system",
+      text: "Welcome to Live API Chat Demo! Connect to the WebSocket server and start a session to begin chatting.",
+    },
+  ]);
+  const [messageInput, setMessageInput] = useState("");
+  const [currentResponse, setCurrentResponse] = useState("");
+  const currentResponseRef = useRef("");
+
+  // Config
+  const [systemInstruction, setSystemInstruction] = useState(
+    "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
+  );
+  const [wsUrl, setWsUrl] = useState("ws://localhost:8000");
+
+  // Stats
+  const [totalTokens, setTotalTokens] = useState(0);
+
+  // Status messages
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+
+  // Refs
+  const wsRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const messageIdRef = useRef(2);
+  const navigate = useNavigate();
+
+  // Session resumption handle
+  const [sessionHandle, setSessionHandle] = useState(null);
+  const [resumeHandle, setResumeHandle] = useState(null);
+  const [shouldReconnect, setShouldReconnect] = useState(false);
+
+  const [distressScore, setDistressScore] = useState(null);
+
+  // Emotion detection effect
   useEffect(() => {
     if (!emotionDetectionEnabled) return;
     let interval;
@@ -85,43 +135,6 @@ const ChatPage = () => {
       }
     };
   }, [emotionDetectionEnabled]);
-
-  // Messages and input
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      type: "system",
-      content: "Welcome to Live API Chat Demo! Connect to the WebSocket server and start a session to begin chatting.",
-    },
-  ]);
-  const [messageInput, setMessageInput] = useState("");
-  const [currentResponse, setCurrentResponse] = useState("");
-  const currentResponseRef = useRef("");
-
-  // Config
-  const [systemInstruction, setSystemInstruction] = useState(
-    "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
-  );
-  const [wsUrl, setWsUrl] = useState("ws://localhost:8000");
-
-  // Stats
-  const [totalTokens, setTotalTokens] = useState(0);
-
-  // Status messages
-  const [errorMessage, setErrorMessage] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-
-  // Refs
-  const wsRef = useRef(null);
-  const messagesEndRef = useRef(null);
-  const messageIdRef = useRef(2);
-
-  // Session resumption handle
-  const [sessionHandle, setSessionHandle] = useState(null);
-  const [resumeHandle, setResumeHandle] = useState(null);
-  const [shouldReconnect, setShouldReconnect] = useState(false);
-
-  const [distressScore, setDistressScore] = useState(null);
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -156,6 +169,27 @@ const ChatPage = () => {
       }, 500);
     }
   }, [shouldReconnect, resumeHandle]);
+
+  // Initialize chat sessions on mount
+  useEffect(() => {
+    const initializeSessions = () => {
+      // Mock chat sessions - replace with actual API call
+      const mockSessions = [
+        { _id: "session1", sessionName: "General Chat" },
+        { _id: "session2", sessionName: "Support Chat" },
+      ];
+      setChatSessions(mockSessions);
+      
+      const savedActiveSession = localStorage.getItem("activeSession");
+      if (savedActiveSession) {
+        setActiveSession(savedActiveSession);
+      } else if (mockSessions.length > 0) {
+        setActiveSession(mockSessions[0]._id);
+      }
+    };
+
+    initializeSessions();
+  }, []);
 
   // WebSocket message handler
   const handleServerMessage = useCallback((data) => {
@@ -284,6 +318,8 @@ const ChatPage = () => {
       id: messageIdRef.current++,
       type,
       content,
+      sender: type === "user" ? "user" : type === "model" ? "bot" : "system",
+      text: content,
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, newMessage]);
@@ -295,11 +331,13 @@ const ChatPage = () => {
 
   const showError = (message) => {
     setErrorMessage(message);
+    antdMessage.error(message);
     console.error("[Client] Error:", message);
   };
 
   const showSuccess = (message) => {
     setSuccessMessage(message);
+    antdMessage.success(message);
   };
 
   const sendToServer = (message) => {
@@ -428,48 +466,8 @@ const ChatPage = () => {
     }
   };
 
-  const startSession = async () => {
-    if (!isConnected) {
-      showError("Not connected to server");
-      return;
-    }
-
-    const message = messageInput.trim();
-    if (!message) {
-      showError("Please enter a message to start the session.");
-      return;
-    }
-    const turns = buildConversationTurns(message);
-
-    const payload = {
-      clientContent: {
-        turns: turns,
-        turnComplete: true,
-        emotion: emotion.current,
-      },
-    };
-
-    console.log("[Client] Starting session with payload:", payload);
-    sendToServer(payload);
-
-    addMessage("user", message);
-    setMessageInput("");
-    setIsTyping(true);
-    setCurrentResponse("");
-    currentResponseRef.current = "";
-  };
-
-  const endSession = async () => {
-    if (!hasActiveSession) return;
-
-    sendToServer({
-      type: "end_session",
-    });
-    console.log("[Client] End session request sent");
-  };
-
   const sendMessage = async () => {
-    const message = messageInput.trim();
+    const message = (messageInput || input).trim();
     if (!message || !hasActiveSession || isTyping) {
       console.log("[Client] Cannot send message:", {
         message: !!message,
@@ -492,11 +490,55 @@ const ChatPage = () => {
     sendToServer(payload);
 
     addMessage("user", message);
-    analyzeDistressScore(message);
+    // analyzeDistressScore(message);hee
     setMessageInput("");
+    setInput("");
     setIsTyping(true);
     setCurrentResponse("");
     currentResponseRef.current = "";
+  };
+
+  const startSession = async () => {
+    if (!isConnected) {
+      showError("Not connected to server");
+      return;
+    }
+
+    const message = (messageInput || input).trim();
+    if (!message) {
+      showError("Please enter a message to start the session.");
+      return;
+    }
+    const turns = buildConversationTurns(message);
+
+    const payload = {
+      clientContent: {
+        turns: turns,
+        turnComplete: true,
+        emotion: emotion.current,
+      },
+    };
+
+    console.log("[Client] Starting session with payload:", payload);
+    sendToServer(payload);
+
+    addMessage("user", message);
+    setMessageInput("");
+    setInput("");
+    setIsTyping(true);
+    setCurrentResponse("");
+    currentResponseRef.current = "";
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (hasActiveSession) {
+        sendMessage();
+      } else {
+        startSession();
+      }
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -510,66 +552,83 @@ const ChatPage = () => {
     }
   };
 
-  const toggleTools = () => {
-    setToolsEnabled(!toolsEnabled);
+  const handleSendMessage = () => {
+    if (hasActiveSession) {
+      sendMessage();
+    } else {
+      startSession();
+    }
   };
 
-  const toggleConfig = () => {
-    setShowConfig(!showConfig);
-  };
-
-  const clearChat = () => {
-    setMessages([
-      {
-        id: 1,
-        type: "system",
-        content: "Chat cleared. Welcome to Live API Chat Demo!",
-      },
-    ]);
+  const handleNewSession = () => {
+    const newSessionId = `session_${Date.now()}`;
+    const newSession = {
+      _id: newSessionId,
+      sessionName: `Chat ${chatSessions.length + 1}`,
+    };
+    setChatSessions(prev => [...prev, newSession]);
+    setActiveSession(newSessionId);
+    localStorage.setItem("activeSession", newSessionId);
+    setMessages([{
+      id: 1,
+      type: "system",
+      content: "New chat session started!",
+      sender: "system",
+      text: "New chat session started!",
+    }]);
     messageIdRef.current = 2;
-    setTotalTokens(0);
-    setSessionHandle(null);
-    setCurrentResponse("");
-    currentResponseRef.current = "";
-    setIsTyping(false);
-    console.log("[Client] Chat cleared");
   };
 
-  const saveConfig = () => {
-    showSuccess("Configuration saved");
-    setShowConfig(false);
-    console.log("[Client] Configuration saved:", {
-      systemInstruction,
-      wsUrl,
-      toolsEnabled,
-    });
+  const fetchMessages = (sessionId) => {
+    // Mock function - replace with actual API call
+    console.log("Fetching messages for session:", sessionId);
+    setMessages([{
+      id: 1,
+      type: "system",
+      content: `Messages loaded for session: ${sessionId}`,
+      sender: "system",
+      text: `Messages loaded for session: ${sessionId}`,
+    }]);
+    messageIdRef.current = 2;
   };
 
-  // Fetch user profile and conversation history, then send as system instruction/context to Gemini backend via WebSocket
+  const handleCallUser = () => {
+    console.log("Making call with:", { phoneNumber, userMessage });
+    antdMessage.success("Call initiated!");
+    setIsModalVisible(false);
+    setPhoneNumber("");
+    setUserMessage("");
+  };
+
+  const handlePlayAudio = () => {
+    if (audioUrl) {
+      const audio = new Audio(audioUrl);
+      audio.play();
+    }
+  };
+
+  const resetTranscript = () => {
+    // Mock function for speech recognition
+    console.log("Transcript reset");
+  };
+
+  const formatText = (text) => {
+    // Simple text formatting function
+    return text?.replace(/\n/g, '<br/>') || '';
+  };
+
+  // Setup Gemini session with context
   const setupGeminiSession = useCallback(async (sessionId) => {
     try {
-      // Fetch user profile
-      const token = localStorage.getItem("token");
-      const userProfileRes = await axios.get(`${NODE_BACKEND_URL}/api/profile`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const { profilePicture, ...userProfile } = userProfileRes.data;
-      // Fetch conversation history
-      const historyRes = await axios.get(`${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}`,
-        { headers: { Authorization: `Bearer ${token}` } });
-      const conversationHistory = (historyRes.data.messages || []).filter(
-        (m) => m.sender === "user" || m.sender === "bot"
-      );
-      // Build system instruction/context
+      // Mock implementation - replace with actual API calls
+      const userProfile = { name: "User", preferences: "helpful assistant" };
+      const conversationHistory = [];
+      
       const systemContext = {
         user_profile: userProfile,
-        conversation_history: conversationHistory.map(msg => ({
-          role: msg.sender === "user" ? "user" : "model",
-          text: msg.text,
-          timestamp: msg.timestamp
-        }))
+        conversation_history: conversationHistory
       };
-      // Send to Gemini backend via WebSocket
+      
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           setup: {
@@ -585,180 +644,282 @@ const ChatPage = () => {
     }
   }, [systemInstruction, toolsEnabled]);
 
-  // On mount or when a new session is created, connect and send context
+  // Connect and setup session when active session changes
   useEffect(() => {
     if (!activeSession) return;
-    // Connect WebSocket if not connected
+    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       connect();
     }
-    // After a short delay to ensure connection, send context
+    
     const timeout = setTimeout(() => {
       setupGeminiSession(activeSession);
     }, 500);
     return () => clearTimeout(timeout);
-  }, [activeSession, connect, setupGeminiSession]);
+  }, [activeSession, setupGeminiSession]);
+
+  // Mock CameraTest component
+  const CameraTest = ({ isVisible, onClose }) => (
+    <Modal
+      title="Camera Test"
+      visible={isVisible}
+      onCancel={onClose}
+      footer={[
+        <Button key="close" onClick={onClose}>
+          Close
+        </Button>,
+      ]}
+    >
+      <div style={{ textAlign: 'center', padding: '20px' }}>
+        <video ref={videoRef} autoPlay muted style={{ width: '100%', maxWidth: '300px' }} />
+        <canvas ref={canvasRef} style={{ display: 'none' }} width="640" height="480" />
+        <p>Current Emotion: {emotion.current || 'None detected'}</p>
+        <Button 
+          onClick={() => setEmotionDetectionEnabled(!emotionDetectionEnabled)}
+          type={emotionDetectionEnabled ? "danger" : "primary"}
+        >
+          {emotionDetectionEnabled ? "Stop Detection" : "Start Detection"}
+        </Button>
+      </div>
+    </Modal>
+  );
+
+  // Mock Loader component
+  const Loader = () => (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100px' }}>
+      <Spin size="large" />
+    </div>
+  );
 
   return (
     <>
-    <Layout>
-      <Sider
-  width={250}
-  collapsible
-  collapsedWidth={50}
-  onCollapse={(collapsed) => setCollapsed(collapsed)}
-  style={{
-    height: "90vh",
-    background: "#f9a8d4",
-    color: "#fff",
-    overflow: "hidden",
-  }}
->
-  <div
-    style={{ marginBottom: "16px", fontSize: "16px", fontWeight: "bold" }}
-  ></div>
-  <Menu
-    theme="light"
-    mode="inline"
-    selectedKeys={[activeSession]}
-    onClick={({ key }) => {
-      setActiveSession(key);
-      localStorage.setItem("activeSession", key);
-      fetchMessages(key);
-    }}
-    items={chatSessions.map((session) => ({
-      key: session._id,
-      icon: <MessageOutlined />,
-      label: session.sessionName,
-    }))}
-  />
-  <Button
-    type="primary"
-    icon={<PlusOutlined />}
-    onClick={handleNewSession}
-    style={{
-      backgroundColor: "#ff4caf",
-      borderColor: "#d9363e",
-      color: "white",
-      fontWeight: "bold",
-      borderRadius: "8px",
-      padding: "10px 16px",
-      height: "2.5rem",
-      marginBottom: "10px",
-    }}
-  >
-    {!collapsed && <span>New Chat</span>}
-  </Button>
-
-  <Button
-    type="primary"
-    icon={<PhoneOutlined />}
-    onClick={() => setIsModalVisible(true)}
-    style={{
-      backgroundColor: "#007AFF",
-      borderColor: "#0056b3",
-      color: "white",
-      fontWeight: "bold",
-      borderRadius: "8px",
-      padding: "10px 16px",
-      height: "2.5rem",
-      width: "100%",
-    }}
-  >
-    {!collapsed && <span>Make a Call</span>}
-  </Button>
-
-  <Button
-    type="primary"
-    icon={<CameraOutlined />}
-    onClick={() => setCameraTestVisible(true)} // Open the CameraTest modal
-    style={{
-      backgroundColor: "#4CAF50",
-      borderColor: "#388E3C",
-      color: "white",
-      fontWeight: "bold",
-      borderRadius: "8px",
-      padding: "10px 16px",
-      height: "2.5rem",
-      width: "100%",
-      marginTop: "10px",
-    }}
-  >
-    {!collapsed && <span>Capture Emotion</span>}
-  </Button>
-
-  {/* <Button onClick={handleCapture} disabled={loading}>
-    {loading ? "Detecting..." : "Capture Emotion"}
-  </Button> */}
-</Sider>
-      <Layout>
-        <Content className="chat-content">
-          <motion.div className="chat-messages">
-            {messages.map((msg, index) => (
-              <motion.div key={index} className={`chat-message ${msg.sender}`}>
-                {msg.jsx ? (
-                  msg.jsx // Render JSX directly if present (for distress message)
-                ) : (
-                  <div
-                    dangerouslySetInnerHTML={{
-                      __html: formatText(msg.text), // Otherwise, format & render text
-                    }}
-                  />
-                )}
-              </motion.div>
-            ))}
-            {loading && (
-              <div className="full-screen-loader">
-                <Loader />
-              </div>
-            )}
-          </motion.div>
-
-          <div className="chat-input-container">
-            {/* <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask what you want..."
-            /> */}
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask what you want..."
-            />
-
-            {/* <Button
-              icon={<AudioOutlined />}
-              onClick={() => {
-                listening
-                  ? SpeechRecognition.stopListening()
-                  : SpeechRecognition.startListening();
+      <Layout style={{ height: '100vh' }}>
+        <Sider
+          width={250}
+          collapsible
+          collapsed={collapsed}
+          collapsedWidth={50}
+          onCollapse={(collapsed) => setCollapsed(collapsed)}
+          style={{
+            height: "100vh",
+            background: "#f9a8d4",
+            color: "#fff",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ padding: '16px', textAlign: 'center' }}>
+            <h3 style={{ color: '#fff', margin: 0 }}>
+              {!collapsed ? 'Chat Sessions' : '💬'}
+            </h3>
+          </div>
+          
+          <Menu
+            theme="light"
+            mode="inline"
+            selectedKeys={[activeSession]}
+            onClick={({ key }) => {
+              setActiveSession(key);
+              localStorage.setItem("activeSession", key);
+              fetchMessages(key);
+            }}
+            style={{ background: 'transparent', border: 'none' }}
+            items={chatSessions.map((session) => ({
+              key: session._id,
+              icon: <MessageOutlined />,
+              label: !collapsed ? session.sessionName : '',
+            }))}
+          />
+          
+          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleNewSession}
+              style={{
+                backgroundColor: "#ff4caf",
+                borderColor: "#d9363e",
+                color: "white",
+                fontWeight: "bold",
+                borderRadius: "8px",
+                height: "40px",
               }}
-            /> */}
+            >
+              {!collapsed && <span>New Chat</span>}
+            </Button>
 
             <Button
-              icon={<AudioOutlined />}
-              onClick={() => {
-                if (listening) {
-                  SpeechRecognition.stopListening();
-                } else {
-                  resetTranscript(); // reset before new listening
-                  SpeechRecognition.startListening({ continuous: false });
-                }
+              type="primary"
+              icon={<PhoneOutlined />}
+              onClick={() => setIsModalVisible(true)}
+              style={{
+                backgroundColor: "#007AFF",
+                borderColor: "#0056b3",
+                color: "white",
+                fontWeight: "bold",
+                borderRadius: "8px",
+                height: "40px",
               }}
-            />
-
-            <Button icon={<SendOutlined />} onClick={handleSendMessage} />
-          </div>
-          {audioUrl && (
-            <Button className="btn" onClick={handlePlayAudio}>
-              Audio Response
+            >
+              {!collapsed && <span>Make a Call</span>}
             </Button>
-          )}
-        </Content>
+
+            <Button
+              type="primary"
+              icon={<CameraOutlined />}
+              onClick={() => setCameraTestVisible(true)}
+              style={{
+                backgroundColor: "#4CAF50",
+                borderColor: "#388E3C",
+                color: "white",
+                fontWeight: "bold",
+                borderRadius: "8px",
+                height: "40px",
+              }}
+            >
+              {!collapsed && <span>Capture Emotion</span>}
+            </Button>
+          </div>
+        </Sider>
+
+        <Layout>
+          <Content style={{ 
+            padding: '20px', 
+            display: 'flex', 
+            flexDirection: 'column',
+            height: '100vh',
+            background: '#fff'
+          }}>
+            <motion.div 
+              style={{ 
+                flex: 1, 
+                overflowY: 'auto', 
+                marginBottom: '20px',
+                padding: '10px',
+                border: '1px solid #e8e8e8',
+                borderRadius: '8px'
+              }}
+            >
+              {messages.map((msg, index) => (
+                <motion.div 
+                  key={msg.id || index} 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{
+                    marginBottom: '15px',
+                    padding: '10px',
+                    borderRadius: '8px',
+                    backgroundColor: msg.sender === 'user' ? '#e6f7ff' : 
+                                   msg.sender === 'bot' ? '#f6ffed' : '#f0f0f0',
+                    alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
+                    maxWidth: '80%',
+                    marginLeft: msg.sender === 'user' ? 'auto' : '0',
+                    marginRight: msg.sender === 'user' ? '0' : 'auto'
+                  }}
+                >
+                  <div>
+                    <strong>{msg.sender === 'user' ? 'You' : msg.sender === 'bot' ? 'Assistant' : 'System'}:</strong>
+                  </div>
+                  {msg.jsx ? (
+                    msg.jsx
+                  ) : (
+                    <div
+                      dangerouslySetInnerHTML={{
+                        __html: formatText(msg.text || msg.content),
+                      }}
+                    />
+                  )}
+                </motion.div>
+              ))}
+              
+              {isTyping && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  style={{
+                    padding: '10px',
+                    backgroundColor: '#f6ffed',
+                    borderRadius: '8px',
+                    marginBottom: '10px'
+                  }}
+                >
+                  <strong>Assistant:</strong> {currentResponse}
+                  <Spin size="small" style={{ marginLeft: '10px' }} />
+                </motion.div>
+              )}
+              
+              {loading && (
+                <div style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: 'rgba(255,255,255,0.8)',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  zIndex: 1000
+                }}>
+                  <Loader />
+                </div>
+              )}
+              
+              <div ref={messagesEndRef} />
+            </motion.div>
+
+            <div style={{ 
+              display: 'flex', 
+              gap: '10px', 
+              alignItems: 'center',
+              padding: '10px',
+              background: '#fafafa',
+              borderRadius: '8px'
+            }}>
+              <Input
+                value={input || messageInput}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  setMessageInput(e.target.value);
+                }}
+                onKeyPress={handleKeyPress}
+                placeholder="Ask what you want..."
+                style={{ flex: 1 }}
+              />
+
+              <Button
+                icon={<AudioOutlined />}
+                onClick={() => {
+                  if (listening) {
+                    setListening(false);
+                    console.log("Stopped listening");
+                  } else {
+                    resetTranscript();
+                    setListening(true);
+                    console.log("Started listening");
+                  }
+                }}
+                type={listening ? "danger" : "default"}
+              />
+
+              <Button 
+                icon={<SendOutlined />} 
+                onClick={handleSendMessage}
+                type="primary"
+                disabled={isTyping}
+              />
+            </div>
+            
+            {audioUrl && (
+              <Button 
+                onClick={handlePlayAudio}
+                style={{ marginTop: '10px', alignSelf: 'center' }}
+              >
+                🔊 Play Audio Response
+              </Button>
+            )}
+          </Content>
+        </Layout>
       </Layout>
-      {/* Call Form Modal */}
 
       <Modal
         title="Make a Call"
@@ -788,11 +949,7 @@ const ChatPage = () => {
           style={{ marginTop: "10px" }}
         />
       </Modal>
-    </Layout>
-    <CameraTest
-    isVisible={isCameraTestVisible}
-    onClose={() => setCameraTestVisible(false)} // Close the modal
-  />
+  
   </>
   );
 };

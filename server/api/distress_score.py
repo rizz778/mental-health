@@ -8,7 +8,7 @@ class DistressRequest(BaseModel):
     text: str
 
 @router.post("/api/distress-score")
-def distress_score_endpoint(request: DistressRequest):
+async def distress_score_endpoint(request: DistressRequest):
     try:
         score = llm_distress_score(request.text)
         return {"score": score}
