@@ -167,7 +167,8 @@ async def websocket_endpoint(
                 else:
                     logger.error(f"[Gemini] Invalid user_turns structure: {print.pformat(user_turns)}")
                     await websocket.send_json({"error": "Invalid message format for Gemini"}) 
-                        
+
+             # /Frame Handling for emotion in text messages    
             elif "frame" in data:
                 try:
                     frame_b64 = data["frame"]
@@ -226,7 +227,7 @@ async def audio_websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            # --- Emotion frame handling ---
+            # --- Emotion frame  in Audio Messages ---
             if "frame" in message:
                 try:
                     frame_b64 = message["frame"]

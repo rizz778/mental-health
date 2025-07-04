@@ -742,6 +742,113 @@ const GeminiAudioChat = () => {
     }
   };
 
+  // ...existing code...
+
+  // --- Voice Activity Detection (VAD) for auto recording ---
+  useEffect(() => {
+    let audioCtx, source, processor, stream;
+    let isSpeech = false;
+    let silenceFrames = 0;
+    let speechChunks = [];
+    const SILENCE_THRESHOLD = 0.01; // Adjust for sensitivity
+    const SILENCE_FRAMES_TO_STOP = 10; // ~0.2s at 50ms per frame
+
+    const startVAD = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            sampleRate: 16000,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: 16000,
+        });
+        source = audioCtx.createMediaStreamSource(stream);
+        processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = (event) => {
+          const input = event.inputBuffer.getChannelData(0);
+          const energy = Math.sqrt(
+            input.reduce((a, b) => a + b * b, 0) / input.length
+          );
+
+          if (energy > SILENCE_THRESHOLD) {
+            // Speech detected
+            if (!isSpeech) {
+              isSpeech = true;
+              speechChunks = [];
+            }
+            speechChunks.push(new Float32Array(input));
+            silenceFrames = 0;
+          } else if (isSpeech) {
+            // Silence after speech
+            silenceFrames++;
+            speechChunks.push(new Float32Array(input));
+            if (silenceFrames > SILENCE_FRAMES_TO_STOP) {
+              // Speech ended, send audio
+              isSpeech = false;
+              silenceFrames = 0;
+              sendSpeech(speechChunks);
+              speechChunks = [];
+            }
+          }
+        };
+
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
+      } catch (err) {
+        addLog("VAD error: " + err.message, "error");
+      }
+    };
+
+    const sendSpeech = async (chunks) => {
+      if (!chunks.length) return;
+      let totalSamples = chunks.reduce((sum, arr) => sum + arr.length, 0);
+      const combinedPCM = new Float32Array(totalSamples);
+      let offset = 0;
+      chunks.forEach((chunk) => {
+        combinedPCM.set(chunk, offset);
+        offset += chunk.length;
+      });
+      const base64Data = convertPCMToBase64(combinedPCM);
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const message = {
+          type: "audio_input",
+          audio_data: base64Data,
+          format: "pcm",
+          sample_rate: 16000,
+          channels: 1,
+          bits_per_sample: 16,
+        };
+        wsRef.current.send(JSON.stringify(message));
+        addLog(
+          `Auto audio sent (${(combinedPCM.length / 16000).toFixed(2)}s)`,
+          "user-input"
+        );
+      }
+    };
+
+    // Start VAD when connected
+    if (isConnected) {
+      startVAD();
+    }
+
+    return () => {
+      if (processor) processor.disconnect();
+      if (source) source.disconnect();
+      if (audioCtx) audioCtx.close();
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+    // Only run when connection changes
+    // eslint-disable-next-line
+  }, [isConnected]);
+
+  // ...existing code...
+
   return (
     <div className="max-w-4xl mx-auto p-6 bg-white shadow-lg rounded-lg">
       {/* Display input/output transcriptions */}
@@ -812,7 +919,7 @@ const GeminiAudioChat = () => {
           </button>
         )}
 
-        <button
+        {/* <button
           onClick={isRecording ? stopRecording : startRecording}
           disabled={!isConnected}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -823,7 +930,7 @@ const GeminiAudioChat = () => {
         >
           {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
           {isRecording ? "Stop Recording" : "Start Recording"}
-        </button>
+        </button> */}
 
         <button
           onClick={toggleMute}
