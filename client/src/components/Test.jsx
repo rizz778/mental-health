@@ -260,6 +260,11 @@ const Test = () => {
         }
         break;
 
+      case "distress_score":
+        // Show the score somewhere in your UI
+        setDistressScore(data.score);
+        break;
+
       default:
         console.log("[Client] Unhandled message type:", data.type, data);
     }
@@ -412,27 +417,6 @@ const Test = () => {
     }
   };
 
-
-  const analyzeDistressScore = async (inputText) => {
-    if (!inputText || inputText.trim() === '') return;
-    try {
-      addLog('Analyzing distress score...', 'info');
-      // Replace this URL with your actual Gemini text API endpoint
-      const response = await fetch('http://localhost:8000/api/distress-score', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: inputText })
-      });
-      if (!response.ok) throw new Error('API error');
-      const data = await response.json();
-      setDistressScore(data.score); // Fix: set only the score, not the whole object
-      console.log(data.score)
-    } catch (err) {
-      addLog('Distress score analysis failed', 'error');
-    }
-  };
-
-
   // Session handlers
   const startSession = async () => {
     if (!isConnected) {
@@ -501,7 +485,6 @@ const Test = () => {
 
     // Add user message and prepare for response
     addMessage("user", message);
-    analyzeDistressScore(message);
     setMessageInput("");
     setIsTyping(true);
     setCurrentResponse("");

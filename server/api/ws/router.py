@@ -216,31 +216,49 @@ async def websocket_endpoint(
         logger.info(f"[WebSocket] Cleanup completed for {client_id}")
 
 audio_manager = AudioConnectionManager()
+emotion_service = EmotionService()
+
 
 @router.websocket("/audio")
 async def audio_websocket_endpoint(websocket: WebSocket):
-    
+    await audio_manager.connect(websocket)
     try:
-        await audio_manager.connect(websocket)
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            gemini_client = audio_manager.active_connections.get(websocket)
-            if not gemini_client:
-                await websocket.close(code=1008, reason="Gemini client not found")
-                break
-            if message["type"] == "setup":
+            # --- Emotion frame handling ---
+            if "frame" in message:
+                try:
+                    frame_b64 = message["frame"]
+                    np_arr = np.frombuffer(base64.b64decode(frame_b64), np.uint8)
+                    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    current_emotion = emotion_service.analyze_frame(frame)
+                    aggregated = emotion_service.get_aggregated_emotion()
+                    await websocket.send_json({
+                        "emotion": {
+                            "current": current_emotion,
+                            "aggregated": aggregated
+                        }
+                    })
+                except Exception as e:
+                    await websocket.send_json({"error": "Emotion processing failed"})
+            # --- Existing audio/text handling ---
+            elif message.get("type") == "setup":
                 config = message.get("config", {})
-                await gemini_client.send_setup(config)
-            elif message["type"] == "audio_input":
+                gemini_client = audio_manager.active_connections.get(websocket)
+                if gemini_client:
+                    await gemini_client.send_setup(config)
+            elif message.get("type") == "audio_input":
                 audio_data = message.get("audio_data", "")
-                if audio_data:
+                gemini_client = audio_manager.active_connections.get(websocket)
+                if gemini_client and audio_data:
                     await gemini_client.send_audio(audio_data)
-            elif message["type"] == "text_input":
+            elif message.get("type") == "text_input":
                 text = message.get("text", "")
-                if text:
+                gemini_client = audio_manager.active_connections.get(websocket)
+                if gemini_client and text:
                     await gemini_client.send_text(text)
             else:
-                logger.warning(f"Unknown message type: {message['type']}")
+                pass  # Unknown message type
     except Exception:
         await audio_manager.disconnect(websocket)

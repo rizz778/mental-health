@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff } from "lucide-react";
 
 const GeminiAudioChat = () => {
   const [isConnected, setIsConnected] = useState(false);
@@ -12,11 +12,11 @@ const GeminiAudioChat = () => {
   const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
   const [cameraPermission, setCameraPermission] = useState(null); // null, true, false
   const [emotionWs, setEmotionWs] = useState(null);
-  const [inputTranscript, setInputTranscript] = useState('');
-  const [outputTranscript, setOutputTranscript] = useState('');
+  const [inputTranscript, setInputTranscript] = useState("");
+  const [outputTranscript, setOutputTranscript] = useState("");
   // Accumulators for current turn (use refs for reliability)
-  const currentInputTranscriptRef = useRef('');
-  const currentOutputTranscriptRef = useRef('');
+  const currentInputTranscriptRef = useRef("");
+  const currentOutputTranscriptRef = useRef("");
 
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -32,9 +32,9 @@ const GeminiAudioChat = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const webcamStreamRef = useRef(null);
-  const [emotion, setEmotion] = useState({ current: '', aggregated: '' });
- const [distress,setDistress]=useState(0);
-  const addLog = useCallback((message, type = 'info') => {
+  const [emotion, setEmotion] = useState({ current: "", aggregated: "" });
+  const [distress, setDistress] = useState(0);
+  const addLog = useCallback((message, type = "info") => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs((prev) => [...prev.slice(-50), { timestamp, message, type }]);
   }, []);
@@ -96,9 +96,15 @@ const GeminiAudioChat = () => {
   };
 
   const playAudioChunk = async (audioData, mimeType) => {
-    console.log('[playAudioChunk] called', { audioDataLength: audioData ? audioData.length : 0, mimeType, isMuted });
+    console.log("[playAudioChunk] called", {
+      audioDataLength: audioData ? audioData.length : 0,
+      mimeType,
+      isMuted,
+    });
     if (!audioContextRef.current || isMuted) {
-      console.log('[playAudioChunk] Skipping playback: audioContextRef.current missing or muted');
+      console.log(
+        "[playAudioChunk] Skipping playback: audioContextRef.current missing or muted"
+      );
       isPlayingRef.current = false;
       updateAudioQueueState();
       playNextAudio(); // Continue queue without delay
@@ -106,11 +112,14 @@ const GeminiAudioChat = () => {
     }
     try {
       // Quick context resume if needed
-      if (audioContextRef.current.state === 'suspended') {
-        console.log('[playAudioChunk] AudioContext suspended, resuming...');
+      if (audioContextRef.current.state === "suspended") {
+        console.log("[playAudioChunk] AudioContext suspended, resuming...");
         await audioContextRef.current.resume();
       }
-      console.log('[playAudioChunk] AudioContext state:', audioContextRef.current.state);
+      console.log(
+        "[playAudioChunk] AudioContext state:",
+        audioContextRef.current.state
+      );
       let audioBuffer;
       if (isPCMFormat(mimeType)) {
         // Optimized PCM processing
@@ -122,12 +131,19 @@ const GeminiAudioChat = () => {
         const int16Array = new Int16Array(uint8Array.buffer);
         const sampleCount = int16Array.length;
         const sampleRate = 24000;
-        audioBuffer = audioContextRef.current.createBuffer(1, sampleCount, sampleRate);
+        audioBuffer = audioContextRef.current.createBuffer(
+          1,
+          sampleCount,
+          sampleRate
+        );
         const channelData = audioBuffer.getChannelData(0);
         for (let i = 0; i < int16Array.length; i++) {
           channelData[i] = int16Array[i] / 32768.0;
         }
-        console.log('[playAudioChunk] PCM buffer created', { sampleCount, sampleRate });
+        console.log("[playAudioChunk] PCM buffer created", {
+          sampleCount,
+          sampleRate,
+        });
       } else {
         // Standard audio decoding
         const binaryString = atob(audioData);
@@ -135,8 +151,12 @@ const GeminiAudioChat = () => {
         for (let i = 0; i < binaryString.length; i++) {
           arrayBuffer[i] = binaryString.charCodeAt(i);
         }
-        audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer.buffer);
-        console.log('[playAudioChunk] Decoded audioBuffer', { duration: audioBuffer.duration });
+        audioBuffer = await audioContextRef.current.decodeAudioData(
+          arrayBuffer.buffer
+        );
+        console.log("[playAudioChunk] Decoded audioBuffer", {
+          duration: audioBuffer.duration,
+        });
       }
       // Create source with minimal overhead
       const source = audioContextRef.current.createBufferSource();
@@ -144,7 +164,7 @@ const GeminiAudioChat = () => {
       source.connect(audioContextRef.current.destination);
       currentAudioSourceRef.current = source;
       source.onended = () => {
-        console.log('[playAudioChunk] Playback ended');
+        console.log("[playAudioChunk] Playback ended");
         isPlayingRef.current = false;
         currentAudioSourceRef.current = null;
         updateAudioQueueState();
@@ -153,12 +173,12 @@ const GeminiAudioChat = () => {
       // Start playback
       isPlayingRef.current = true;
       updateAudioQueueState();
-      console.log('[playAudioChunk] Starting playback');
+      console.log("[playAudioChunk] Starting playback");
       source.start(0);
-      addLog(`Playing audio (${audioBuffer.duration.toFixed(2)}s)`, 'success');
+      addLog(`Playing audio (${audioBuffer.duration.toFixed(2)}s)`, "success");
     } catch (error) {
-      console.error('[playAudioChunk] Audio error:', error);
-      addLog(`Audio error: ${error.message}`, 'error');
+      console.error("[playAudioChunk] Audio error:", error);
+      addLog(`Audio error: ${error.message}`, "error");
       isPlayingRef.current = false;
       currentAudioSourceRef.current = null;
       updateAudioQueueState();
@@ -212,8 +232,8 @@ const GeminiAudioChat = () => {
 
       // Ensure audio context is ready
       await initializeAudioContext();
-      
-      const wsUrl = 'ws://localhost:8000/audio';
+
+      const wsUrl = "ws://localhost:8000/audio";
       wsRef.current = new WebSocket(wsUrl);
 
       wsRef.current.onopen = () => {
@@ -235,7 +255,7 @@ const GeminiAudioChat = () => {
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('[WebSocket message]', data); // Log all incoming messages
+          console.log("[WebSocket message]", data); // Log all incoming messages
           switch (data.type) {
             case "audio":
               console.log("Received audio data");
@@ -243,67 +263,92 @@ const GeminiAudioChat = () => {
                 queueAudio(data.audio_data, data.mime_type || "audio/pcm");
               }
               break;
-            case 'transcript':
-              console.log('[transcript] Gemini:', data.text);
-              addLog(`Gemini: ${data.text}`, 'ai-response');
+            case "transcript":
+              console.log("[transcript] Gemini:", data.text);
+              addLog(`Gemini: ${data.text}`, "ai-response");
               break;
-            case 'user_transcript':
-              console.log('[user_transcript] You:', data.text);
-              addLog(`You: ${data.text}`, 'user-input');
+            case "user_transcript":
+              console.log("[user_transcript] You:", data.text);
+              addLog(`You: ${data.text}`, "user-input");
               break;
-            case 'input_transcription':
+            case "input_transcription":
               // Accumulate input transcription chunks
-              currentInputTranscriptRef.current += (data.text || '');
-              console.log('[input_transcription chunk]', data.text, '| Accumulated:', currentInputTranscriptRef.current);
+              currentInputTranscriptRef.current += data.text || "";
+              console.log(
+                "[input_transcription chunk]",
+                data.text,
+                "| Accumulated:",
+                currentInputTranscriptRef.current
+              );
               // If this is the last chunk (data.final or data.is_final), finalize
               if (data.final || data.is_final) {
                 setInputTranscript(currentInputTranscriptRef.current);
                 analyzeDistressScore(currentInputTranscriptRef.current); // Analyze in parallel
-                currentInputTranscriptRef.current = '';
-                console.log('[input_transcription] Finalized:', inputTranscript);
+                currentInputTranscriptRef.current = "";
+                console.log(
+                  "[input_transcription] Finalized:",
+                  inputTranscript
+                );
               }
               break;
-            case 'output_transcription':
+            case "output_transcription":
               // Accumulate output transcription chunks
-              currentOutputTranscriptRef.current += (data.text || '');
-              console.log('[output_transcription chunk]', data.text, '| Accumulated:', currentOutputTranscriptRef.current);
+              currentOutputTranscriptRef.current += data.text || "";
+              console.log(
+                "[output_transcription chunk]",
+                data.text,
+                "| Accumulated:",
+                currentOutputTranscriptRef.current
+              );
               // If this is the last chunk (data.final or data.is_final), finalize
               if (data.final || data.is_final) {
                 setOutputTranscript(currentOutputTranscriptRef.current);
-                currentOutputTranscriptRef.current = '';
-                console.log('[output_transcription] Finalized:', outputTranscript);
+                currentOutputTranscriptRef.current = "";
+                console.log(
+                  "[output_transcription] Finalized:",
+                  outputTranscript
+                );
               }
               break;
-            case 'info':
-              console.log('[info]', data.message);
-              addLog(data.message, 'info');
+            case "info":
+              console.log("[info]", data.message);
+              addLog(data.message, "info");
               break;
-            case 'turnComplete':
+            case "turnComplete":
               // On turnComplete, finalize any remaining accumulated transcripts
               if (currentInputTranscriptRef.current) {
                 setInputTranscript(currentInputTranscriptRef.current);
                 analyzeDistressScore(currentInputTranscriptRef.current); // Analyze in parallel
-                currentInputTranscriptRef.current = '';
-                console.log('[turnComplete] Finalizing input transcript:', currentInputTranscriptRef.current);
+                currentInputTranscriptRef.current = "";
+                console.log(
+                  "[turnComplete] Finalizing input transcript:",
+                  currentInputTranscriptRef.current
+                );
               }
               if (currentOutputTranscriptRef.current) {
                 setOutputTranscript(currentOutputTranscriptRef.current);
-                console.log('[turnComplete] Finalizing output transcript:', currentOutputTranscriptRef.current);
-                currentOutputTranscriptRef.current = '';
+                console.log(
+                  "[turnComplete] Finalizing output transcript:",
+                  currentOutputTranscriptRef.current
+                );
+                currentOutputTranscriptRef.current = "";
               }
-              addLog(`[turnComplete event] Finalizing transcripts`, 'success');
+              addLog(`[turnComplete event] Finalizing transcripts`, "success");
               break;
-            case 'error':
-              console.error('[error]', data.message);
-              addLog(`Error: ${data.message}`, 'error');
+            case "error":
+              console.error("[error]", data.message);
+              addLog(`Error: ${data.message}`, "error");
               break;
             default:
-              console.log('[unhandled message type]', data);
+              console.log("[unhandled message type]", data);
               break;
           }
+          if (data.emotion) {
+            setEmotion(data.emotion);
+          }
         } catch (error) {
-          console.error('[Message parsing error]', error);
-          addLog(`Message parsing error: ${error.message}`, 'error');
+          console.error("[Message parsing error]", error);
+          addLog(`Message parsing error: ${error.message}`, "error");
         }
       };
 
@@ -340,8 +385,8 @@ const GeminiAudioChat = () => {
   };
 
   const startRecording = async () => {
-    currentInputTranscriptRef.current = '';
-    currentOutputTranscriptRef.current = '';
+    currentInputTranscriptRef.current = "";
+    currentOutputTranscriptRef.current = "";
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -396,21 +441,14 @@ const GeminiAudioChat = () => {
   // --- Emotion capture logic (real backend integration) ---
   useEffect(() => {
     let interval = null;
-    let ws = null;
     if (!emotionDetectionEnabled) {
-      // Stop webcam if running
       if (webcamStreamRef.current) {
-        webcamStreamRef.current.getTracks().forEach(track => track.stop());
+        webcamStreamRef.current.getTracks().forEach((track) => track.stop());
         webcamStreamRef.current = null;
       }
-      setEmotion((prev) => ({ ...prev, aggregated: '' }));
-      if (emotionWs) {
-        emotionWs.close();
-        setEmotionWs(null);
-      }
+      setEmotion({ current: "", aggregated: "" });
       return;
     }
-    // Start webcam
     navigator.mediaDevices
       .getUserMedia({ video: true })
       .then((stream) => {
@@ -419,59 +457,47 @@ const GeminiAudioChat = () => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
-        // Open emotion WebSocket
-        ws = new WebSocket('ws://localhost:8000/');
-        setEmotionWs(ws);
-        ws.onopen = () => {
-          // Send setup message if needed by backend
-          ws.send(JSON.stringify({ setup: { mode: 'emotion' } }));
-        };
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.emotion) {
-              setEmotion(data.emotion);
-            }
-          } catch (e) {}
-        };
-        ws.onerror = (e) => {
-          setCameraPermission(false);
-        };
-        ws.onclose = () => {
-          setEmotionWs(null);
-        };
         interval = setInterval(() => {
           const canvas = canvasRef.current;
           const video = videoRef.current;
-          if (canvas && video && ws && ws.readyState === WebSocket.OPEN) {
-            const ctx = canvas.getContext('2d');
+          if (
+            canvas &&
+            video &&
+            wsRef.current &&
+            wsRef.current.readyState === WebSocket.OPEN
+          ) {
+            const ctx = canvas.getContext("2d");
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob((blob) => {
-              const reader = new FileReader();
-              reader.onloadend = () => {
-                const base64data = reader.result.split(',')[1];
-                ws.send(JSON.stringify({ frame: base64data }));
-              };
-              reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.8);
+            canvas.toBlob(
+              (blob) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  const base64data = reader.result.split(",")[1];
+                  wsRef.current.send(JSON.stringify({ frame: base64data }));
+                };
+                reader.readAsDataURL(blob);
+              },
+              "image/jpeg",
+              0.8
+            );
           }
         }, 1000);
       })
       .catch((err) => {
         setCameraPermission(false);
-        setEmotion((prev) => ({ ...prev, aggregated: '' }));
-        if (ws) ws.close();
-        console.error('Error accessing webcam:', err);
+        setEmotion({ current: "", aggregated: "" });
+        if (webcamStreamRef.current) {
+          webcamStreamRef.current.getTracks().forEach((track) => track.stop());
+          webcamStreamRef.current = null;
+        }
+        console.error("Error accessing webcam:", err);
       });
-    // Cleanup on unmount or disable
     return () => {
       if (interval) clearInterval(interval);
       if (webcamStreamRef.current) {
-        webcamStreamRef.current.getTracks().forEach(track => track.stop());
+        webcamStreamRef.current.getTracks().forEach((track) => track.stop());
         webcamStreamRef.current = null;
       }
-      if (ws) ws.close();
-      setEmotionWs(null);
     };
   }, [emotionDetectionEnabled]);
 
@@ -479,17 +505,21 @@ const GeminiAudioChat = () => {
   const synthesizeEmotionPCM = async (emotionText) => {
     return new Promise((resolve, reject) => {
       try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)(
+          { sampleRate: 16000 }
+        );
         const utter = new window.SpeechSynthesisUtterance(emotionText);
-        utter.lang = 'en-US';
+        utter.lang = "en-US";
         let dest = audioCtx.createMediaStreamDestination();
         utter.onend = async () => {
           // Record the TTS output
-          const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm' });
+          const recorder = new MediaRecorder(dest.stream, {
+            mimeType: "audio/webm",
+          });
           let chunks = [];
           recorder.ondataavailable = (e) => chunks.push(e.data);
           recorder.onstop = async () => {
-            const blob = new Blob(chunks, { type: 'audio/webm' });
+            const blob = new Blob(chunks, { type: "audio/webm" });
             const arrayBuffer = await blob.arrayBuffer();
             // Decode to PCM
             let audioBuffer;
@@ -511,7 +541,8 @@ const GeminiAudioChat = () => {
                 const idxLow = Math.floor(idx);
                 const idxHigh = Math.min(Math.ceil(idx), pcm.length - 1);
                 const weight = idx - idxLow;
-                resampled[i] = (1 - weight) * pcm[idxLow] + weight * pcm[idxHigh];
+                resampled[i] =
+                  (1 - weight) * pcm[idxLow] + weight * pcm[idxHigh];
               }
               pcm = resampled;
             }
@@ -546,12 +577,17 @@ const GeminiAudioChat = () => {
     setIsRecording(false);
     if (audioChunksRef.current.length > 0) {
       let totalSamples = 0;
-      audioChunksRef.current.forEach(chunk => { totalSamples += chunk.length; });
+      audioChunksRef.current.forEach((chunk) => {
+        totalSamples += chunk.length;
+      });
       const combinedPCM = new Float32Array(totalSamples);
       let offset = 0;
-      audioChunksRef.current.forEach(chunk => { combinedPCM.set(chunk, offset); offset += chunk.length; });
+      audioChunksRef.current.forEach((chunk) => {
+        combinedPCM.set(chunk, offset);
+        offset += chunk.length;
+      });
       // Synthesize emotion TTS to PCM and prepend
-      let emotionText = '';
+      let emotionText = "";
       if (emotionDetectionEnabled && emotion.aggregated) {
         emotionText = `The user's emotion is: ${emotion.aggregated}`;
       }
@@ -561,7 +597,7 @@ const GeminiAudioChat = () => {
           ttsPCM = await synthesizeEmotionPCM(emotionText);
         }
       } catch (err) {
-        addLog('TTS error, sending only user audio', 'error');
+        addLog("TTS error, sending only user audio", "error");
       }
       let finalPCM;
       if (ttsPCM && ttsPCM.length > 0 && !isNaN(ttsPCM[0])) {
@@ -576,14 +612,21 @@ const GeminiAudioChat = () => {
         const message = {
           type: "audio_input",
           audio_data: base64Data,
-          emotion: emotionDetectionEnabled ? emotion.aggregated : '',
-          format: 'pcm',
+          emotion: emotionDetectionEnabled ? emotion.aggregated : "",
+          format: "pcm",
           sample_rate: 16000,
           channels: 1,
           bits_per_sample: 16,
         };
         wsRef.current.send(JSON.stringify(message));
-        addLog(`Audio sent (${(finalPCM.length / 16000).toFixed(2)}s) with emotion: ${emotionDetectionEnabled ? emotion.aggregated : 'none'}`, 'user-input');
+        addLog(
+          `Audio sent (${(finalPCM.length / 16000).toFixed(
+            2
+          )}s) with emotion: ${
+            emotionDetectionEnabled ? emotion.aggregated : "none"
+          }`,
+          "user-input"
+        );
       }
     }
     audioChunksRef.current = [];
@@ -592,21 +635,21 @@ const GeminiAudioChat = () => {
 
   // Analyze distress score using Gemini API (runs in parallel)
   const analyzeDistressScore = async (inputText) => {
-    if (!inputText || inputText.trim() === '') return;
+    if (!inputText || inputText.trim() === "") return;
     try {
-      addLog('Analyzing distress score...', 'info');
+      addLog("Analyzing distress score...", "info");
       // Replace this URL with your actual Gemini text API endpoint
-      const response = await fetch('http://localhost:8000/api/distress-score', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: inputText })
+      const response = await fetch("http://localhost:8000/api/distress-score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: inputText }),
       });
-      if (!response.ok) throw new Error('API error');
+      if (!response.ok) throw new Error("API error");
       const data = await response.json();
       setDistress(data.score); // Fix: set only the score, not the whole object
-      console.log(data.score)
+      console.log(data.score);
     } catch (err) {
-      addLog('Distress score analysis failed', 'error');
+      addLog("Distress score analysis failed", "error");
     }
   };
 
@@ -714,8 +757,18 @@ const GeminiAudioChat = () => {
           </div>
         )}
         <div>
-          <b>Distress Score:</b>{distress}
+          <b>Distress Score:</b>
+          {distress}
         </div>
+        {emotionDetectionEnabled && (
+          <div className="mt-2">
+            <b>Current Emotion:</b>{" "}
+            {emotion.current || <span className="text-gray-400">N/A</span>}
+            <br />
+            <b>Aggregated Emotion:</b>{" "}
+            {emotion.aggregated || <span className="text-gray-400">N/A</span>}
+          </div>
+        )}
       </div>
 
       <div className="mb-6">
@@ -786,15 +839,25 @@ const GeminiAudioChat = () => {
 
         <button
           onClick={() => setEmotionDetectionEnabled((v) => !v)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${emotionDetectionEnabled ? 'bg-yellow-600 text-white hover:bg-yellow-700' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            emotionDetectionEnabled
+              ? "bg-yellow-600 text-white hover:bg-yellow-700"
+              : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+          }`}
         >
-          {emotionDetectionEnabled ? 'Disable Emotion Detection' : 'Enable Emotion Detection'}
+          {emotionDetectionEnabled
+            ? "Disable Emotion Detection"
+            : "Enable Emotion Detection"}
         </button>
         {emotionDetectionEnabled && cameraPermission === false && (
-          <span className="text-red-600 text-sm ml-2">Camera permission denied</span>
+          <span className="text-red-600 text-sm ml-2">
+            Camera permission denied
+          </span>
         )}
         {emotionDetectionEnabled && cameraPermission === true && (
-          <span className="text-green-600 text-sm ml-2">Emotion detection active</span>
+          <span className="text-green-600 text-sm ml-2">
+            Emotion detection active
+          </span>
         )}
 
         {audioQueueLength > 0 && (
@@ -834,8 +897,19 @@ const GeminiAudioChat = () => {
         <p>• Queue shows pending audio chunks for smooth playback</p>
       </div>
 
-      <video ref={videoRef} autoPlay playsInline className="w-32 rounded shadow" style={{ display: emotionDetectionEnabled ? 'block' : 'none' }} />
-      <canvas ref={canvasRef} width="224" height="224" style={{ display: 'none' }} />
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className="w-32 rounded shadow"
+        style={{ display: emotionDetectionEnabled ? "block" : "none" }}
+      />
+      <canvas
+        ref={canvasRef}
+        width="224"
+        height="224"
+        style={{ display: "none" }}
+      />
     </div>
   );
 };

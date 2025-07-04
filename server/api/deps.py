@@ -1,6 +1,5 @@
 from services.gemini_service import GeminiService
 from services.emotion_service import EmotionService
-from services.emotion_service import EmotionService
 
 from core.config import settings
 
