@@ -95,6 +95,12 @@ async def websocket_endpoint(
                 
                 if "TEXT" in response_modalities:
                     session, session_cm = await gemini_service.start_session(gemini_config,model=model)
+                    import types as pytypes
+                    logger.info(f"[WebSocket] session type: {type(session)} session_cm type: {type(session_cm)}")
+                    logger.info(f"[WebSocket] session.receive type: {type(session.receive)}")
+                    result = session.receive()
+                    logger.info(f"[WebSocket] session.receive() returned: {type(result)}")
+                    # Do not await result here, just log type for diagnostics
                     active_sessions[client_id] = {
                         "session": session,
                         "session_cm": session_cm,

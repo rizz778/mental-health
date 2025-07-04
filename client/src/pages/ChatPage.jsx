@@ -789,7 +789,7 @@ const fetchSessions = async () => {
   }, [fetchSessions]);
  useEffect(()=>{
   fetchUserProfile();
- })
+ },[])
   // When switching sessions, fetch messages from backend
   useEffect(() => {
     if (activeSession) {
@@ -936,6 +936,21 @@ const fetchSessions = async () => {
     </div>
   );
 
+  // Helper to close the main chat WebSocket connection
+  const closeChatSocket = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+      setIsConnected(false);
+      setConnectionStatus("Disconnected");
+      setHasActiveSession(false);
+      setIsTyping(false);
+      setCurrentResponse("");
+      currentResponseRef.current = "";
+      addSystemMessage("Disconnected from server (closed for audio modal)");
+    }
+  };
+
   return (
     <>
       {/* Always render the hidden video and canvas for emotion detection */}
@@ -998,7 +1013,10 @@ const fetchSessions = async () => {
             <Button
               type="primary"
               icon={<PhoneOutlined />}
-              onClick={() => setIsAudioModalVisible(true)}
+              onClick={() => {
+                closeChatSocket();
+                setIsAudioModalVisible(true);
+              }}
               style={{
                 backgroundColor: "#007AFF",
                 borderColor: "#0056b3",

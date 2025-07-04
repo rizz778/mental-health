@@ -16,6 +16,7 @@ class GeminiService:
     async def start_session(self, config, model=None):
         # Enable context window compression with a sliding window
         from google.genai import types
+        import types as pytypes
         # If config is a dict, build a LiveConnectConfig object
         if isinstance(config, dict):
             config = types.LiveConnectConfig(
@@ -31,6 +32,11 @@ class GeminiService:
         model_to_use = model or self.model
         session_cm = self.client.aio.live.connect(model=model_to_use, config=config)
         session = await session_cm.__aenter__()
+        # Defensive: Log and check type
+        if isinstance(session, pytypes.AsyncGeneratorType):
+            logger.error("[BUG] start_session returned async_generator! This should never happen.")
+        else:
+            logger.info(f"[GeminiService] start_session returned session of type: {type(session)}")
         return session, session_cm
 
     
@@ -78,15 +84,11 @@ class GeminiService:
         # Input validation
         if not websocket or not hasattr(websocket, 'send'):
             return
-            
         if not isinstance(client_id, str):
             return
-            
         if not isinstance(active_sessions, dict):
             return
-        
         try:
-            # Defensive: Ensure session is the correct type (not an async_generator)
             import types as pytypes
             if isinstance(session, pytypes.AsyncGeneratorType):
                 logger.error(f"[GeminiService] ERROR: session is an async_generator, not a Gemini session object! Did you forget to await __aenter__()? client_id={client_id}")
@@ -96,19 +98,8 @@ class GeminiService:
                 })
                 return
 
-            # FIXED: Ensure active_sessions[client_id] is properly initialized as a dict
-            # and handle the case where it might be a string or other type
-            if client_id not in active_sessions:
-                active_sessions[client_id] = {}
-            elif not isinstance(active_sessions[client_id], dict):
-                active_sessions[client_id] = {}
-            
-            while True:
-                try:
-                    response = await session.receive()
-                except Exception as e:
-                    logger.error(f"[GeminiService] Session receive error for {client_id}: {e}")
-                    break  # Exit loop if session is closed or generator is exhausted
+            # Use async for to support async generator from session.receive()
+            async for response in session.receive():
                 logger.info(f"[GeminiService] Received from Gemini: {response}")
                 
                 # Defensive: If response is bytes, decode to string
@@ -119,7 +110,7 @@ class GeminiService:
                         "message": f"Unexpected Gemini API response: {response_str}"
                     })
                     continue
-                    
+                
                 # Defensive: If response is a string, log and skip
                 elif isinstance(response, str):
                     await self._safe_websocket_send(websocket, client_id, {

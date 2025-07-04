@@ -12,78 +12,104 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
   const [audioQueueLength, setAudioQueueLength] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
-  const [cameraPermission, setCameraPermission] = useState(null); // null, true, false
+  const [cameraPermission, setCameraPermission] = useState(null);
   const [emotionWs, setEmotionWs] = useState(null);
   const [inputTranscript, setInputTranscript] = useState('');
   const [outputTranscript, setOutputTranscript] = useState('');
-  // Accumulators for current turn (use refs for reliability)
-  const currentInputTranscriptRef = useRef('');
-  const currentOutputTranscriptRef = useRef('');
+  const [distress, setDistress] = useState(0);
   const [log, setLog] = useState("");
 
+  // Refs for audio management
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioContextRef = useRef(null);
   const audioProcessorRef = useRef(null);
   const streamRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const audioQueueRef = useRef([]);
-  const isPlayingRef = useRef(false);
-  const currentAudioSourceRef = useRef(null);
   const recordingTimeoutRef = useRef(null);
   const audioContextReadyRef = useRef(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const webcamStreamRef = useRef(null);
   const [emotion, setEmotion] = useState({ current: '', aggregated: '' });
- const [distress,setDistress]=useState(0);
+  
+  // Enhanced audio system refs
+  const audioBufferRef = useRef([]);
+  const isPlayingRef = useRef(false);
+  const currentSourceRef = useRef(null);
+  const nextSourceRef = useRef(null);
+  const audioSchedulerRef = useRef(null);
+  const playbackStartTimeRef = useRef(0);
+  const bufferDurationRef = useRef(0);
+  const crossfadeGainRef = useRef(null);
+  const masterGainRef = useRef(null);
+  
+  // Transcript accumulators
+  const currentInputTranscriptRef = useRef('');
+  const currentOutputTranscriptRef = useRef('');
+
+  // Audio configuration
+  const AUDIO_CONFIG = {
+    sampleRate: 24000,
+    bufferSize: 4096,
+    minBufferChunks: 3,
+    maxBufferChunks: 10,
+    crossfadeDuration: 0.05, // 50ms crossfade
+    lookAheadTime: 0.1, // 100ms lookahead
+    targetLatency: 0.05, // 50ms target latency
+  };
+
   const addLog = useCallback((message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs((prev) => [...prev.slice(-50), { timestamp, message, type }]);
   }, []);
 
-  const updateAudioQueueState = () => {
-    setAudioQueueLength(audioQueueRef.current.length);
-    setIsPlaying(isPlayingRef.current);
-  };
-
+  // Enhanced audio context initialization
   const initializeAudioContext = async () => {
-    if (audioContextReadyRef.current) return;
+    if (audioContextReadyRef.current && audioContextRef.current?.state !== 'closed') {
+      return;
+    }
 
     try {
-      audioContextRef.current = new (window.AudioContext ||
-        window.webkitAudioContext)({
-        sampleRate: 24000,
-        latencyHint: "interactive", // Optimize for low latency
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: AUDIO_CONFIG.sampleRate,
+        latencyHint: 'interactive',
       });
 
-      // Resume immediately if suspended
-      if (audioContextRef.current.state === "suspended") {
+      // Create master gain node for volume control
+      masterGainRef.current = audioContextRef.current.createGain();
+      masterGainRef.current.connect(audioContextRef.current.destination);
+
+      // Create crossfade gain node for smooth transitions
+      crossfadeGainRef.current = audioContextRef.current.createGain();
+      crossfadeGainRef.current.connect(masterGainRef.current);
+
+      if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
       }
 
       audioContextReadyRef.current = true;
-      addLog(
-        `Audio context ready (${audioContextRef.current.sampleRate}Hz)`,
-        "success"
-      );
+      addLog(`Enhanced audio context ready (${audioContextRef.current.sampleRate}Hz)`, 'success');
     } catch (error) {
-      addLog(`Audio context error: ${error.message}`, "error");
+      addLog(`Audio context error: ${error.message}`, 'error');
     }
   };
 
-  // Optimized PCM conversion - removed logging overhead
+  // Optimized PCM conversion with better performance
   const convertPCMToBase64 = (pcmData) => {
     const int16Array = new Int16Array(pcmData.length);
+    
+    // Vectorized conversion
     for (let i = 0; i < pcmData.length; i++) {
       int16Array[i] = Math.round(Math.max(-1, Math.min(1, pcmData[i])) * 32767);
     }
 
     const uint8Array = new Uint8Array(int16Array.buffer);
-    let binary = "";
-    const chunkSize = 8192;
-
-    // Process in chunks for better performance
+    
+    // Use larger chunks for better performance
+    const chunkSize = 65536; // 64KB chunks
+    let binary = '';
+    
     for (let i = 0; i < uint8Array.length; i += chunkSize) {
       const chunk = uint8Array.subarray(i, i + chunkSize);
       binary += String.fromCharCode.apply(null, chunk);
@@ -93,127 +119,195 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
   };
 
   const isPCMFormat = (mimeType) => {
-    return (
-      mimeType && (mimeType.startsWith("audio/pcm") || mimeType.includes("pcm"))
-    );
+    return mimeType && (mimeType.startsWith('audio/pcm') || mimeType.includes('pcm'));
   };
 
-  const playAudioChunk = async (audioData, mimeType) => {
-    console.log('[playAudioChunk] called', { audioDataLength: audioData ? audioData.length : 0, mimeType, isMuted });
-    if (!audioContextRef.current || isMuted) {
-      console.log('[playAudioChunk] Skipping playback: audioContextRef.current missing or muted');
-      isPlayingRef.current = false;
-      updateAudioQueueState();
-      playNextAudio(); // Continue queue without delay
+  // Enhanced audio buffer creation with resampling
+  const createAudioBuffer = async (audioData, mimeType) => {
+    if (!audioContextRef.current) {
+      throw new Error('Audio context not initialized');
+    }
+
+    let audioBuffer;
+
+    if (isPCMFormat(mimeType)) {
+      // Optimized PCM processing
+      const binaryString = atob(audioData);
+      const uint8Array = new Uint8Array(binaryString.length);
+      
+      for (let i = 0; i < binaryString.length; i++) {
+        uint8Array[i] = binaryString.charCodeAt(i);
+      }
+      
+      const int16Array = new Int16Array(uint8Array.buffer);
+      const sampleCount = int16Array.length;
+      
+      audioBuffer = audioContextRef.current.createBuffer(
+        1, 
+        sampleCount, 
+        AUDIO_CONFIG.sampleRate
+      );
+      
+      const channelData = audioBuffer.getChannelData(0);
+      
+      // Optimized sample conversion
+      for (let i = 0; i < int16Array.length; i++) {
+        channelData[i] = int16Array[i] / 32768.0;
+      }
+    } else {
+      // Standard audio decoding
+      const binaryString = atob(audioData);
+      const arrayBuffer = new Uint8Array(binaryString.length);
+      
+      for (let i = 0; i < binaryString.length; i++) {
+        arrayBuffer[i] = binaryString.charCodeAt(i);
+      }
+      
+      audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer.buffer);
+    }
+
+    return audioBuffer;
+  };
+
+  // Smooth audio scheduler with crossfading
+  const scheduleAudioPlayback = (audioBuffer, startTime = 0) => {
+    if (!audioContextRef.current || isMuted) return null;
+
+    const source = audioContextRef.current.createBufferSource();
+    const gainNode = audioContextRef.current.createGain();
+    
+    source.buffer = audioBuffer;
+    source.connect(gainNode);
+    gainNode.connect(crossfadeGainRef.current);
+
+    // Calculate when to start this audio
+    const currentTime = audioContextRef.current.currentTime;
+    const actualStartTime = Math.max(currentTime + AUDIO_CONFIG.lookAheadTime, startTime);
+
+    // Smooth fade-in to avoid clicks
+    gainNode.gain.setValueAtTime(0, actualStartTime);
+    gainNode.gain.linearRampToValueAtTime(1, actualStartTime + AUDIO_CONFIG.crossfadeDuration);
+    
+    // Smooth fade-out before ending
+    const endTime = actualStartTime + audioBuffer.duration;
+    gainNode.gain.setValueAtTime(1, endTime - AUDIO_CONFIG.crossfadeDuration);
+    gainNode.gain.linearRampToValueAtTime(0, endTime);
+
+    source.start(actualStartTime);
+    source.stop(endTime);
+
+    return {
+      source,
+      gainNode,
+      startTime: actualStartTime,
+      endTime,
+      duration: audioBuffer.duration
+    };
+  };
+
+  // Improved audio queue management: play one chunk at a time, always check for next chunk on end
+  const processAudioQueue = async () => {
+    if (isPlayingRef.current) return;
+    if (audioBufferRef.current.length === 0) return;
+
+    // Optionally buffer a minimum number of chunks before starting
+    if (!isPlaying && audioBufferRef.current.length < AUDIO_CONFIG.minBufferChunks) {
+      // Wait for more chunks to arrive
+      setTimeout(processAudioQueue, 30);
       return;
     }
+
     try {
-      // Quick context resume if needed
-      if (audioContextRef.current.state === 'suspended') {
-        console.log('[playAudioChunk] AudioContext suspended, resuming...');
-        await audioContextRef.current.resume();
-      }
-      console.log('[playAudioChunk] AudioContext state:', audioContextRef.current.state);
-      let audioBuffer;
-      if (isPCMFormat(mimeType)) {
-        // Optimized PCM processing
-        const binaryString = atob(audioData);
-        const uint8Array = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          uint8Array[i] = binaryString.charCodeAt(i);
-        }
-        const int16Array = new Int16Array(uint8Array.buffer);
-        const sampleCount = int16Array.length;
-        const sampleRate = 24000;
-        audioBuffer = audioContextRef.current.createBuffer(1, sampleCount, sampleRate);
-        const channelData = audioBuffer.getChannelData(0);
-        for (let i = 0; i < int16Array.length; i++) {
-          channelData[i] = int16Array[i] / 32768.0;
-        }
-        console.log('[playAudioChunk] PCM buffer created', { sampleCount, sampleRate });
-      } else {
-        // Standard audio decoding
-        const binaryString = atob(audioData);
-        const arrayBuffer = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          arrayBuffer[i] = binaryString.charCodeAt(i);
-        }
-        audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer.buffer);
-        console.log('[playAudioChunk] Decoded audioBuffer', { duration: audioBuffer.duration });
-      }
-      // Create source with minimal overhead
-      const source = audioContextRef.current.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioContextRef.current.destination);
-      currentAudioSourceRef.current = source;
-      source.onended = () => {
-        console.log('[playAudioChunk] Playback ended');
-        isPlayingRef.current = false;
-        currentAudioSourceRef.current = null;
-        updateAudioQueueState();
-        playNextAudio(); // Continue immediately
-      };
-      // Start playback
       isPlayingRef.current = true;
-      updateAudioQueueState();
-      console.log('[playAudioChunk] Starting playback');
-      source.start(0);
-      addLog(`Playing audio (${audioBuffer.duration.toFixed(2)}s)`, 'success');
+      setIsPlaying(true);
+      const chunk = audioBufferRef.current.shift();
+      setAudioQueueLength(audioBufferRef.current.length);
+      const audioBuffer = await createAudioBuffer(chunk.data, chunk.mimeType);
+      const source = scheduleAudioPlayback(audioBuffer);
+      if (source) {
+        currentSourceRef.current = source.source;
+        source.source.onended = () => {
+          isPlayingRef.current = false;
+          setIsPlaying(false);
+          setAudioQueueLength(audioBufferRef.current.length);
+          // Immediately play next chunk if available
+          if (audioBufferRef.current.length > 0) {
+            processAudioQueue();
+          }
+        };
+        addLog(`Playing 1 chunk (${audioBuffer.duration.toFixed(2)}s)`, 'success');
+      } else {
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+      }
     } catch (error) {
-      console.error('[playAudioChunk] Audio error:', error);
-      addLog(`Audio error: ${error.message}`, 'error');
+      addLog(`Audio processing error: ${error.message}`, 'error');
       isPlayingRef.current = false;
-      currentAudioSourceRef.current = null;
-      updateAudioQueueState();
-      playNextAudio(); // Continue on error
+      setIsPlaying(false);
+      // Try next chunk if available
+      if (audioBufferRef.current.length > 0) {
+        setTimeout(processAudioQueue, 100);
+      }
     }
   };
 
-  const playNextAudio = () => {
-    if (audioQueueRef.current.length > 0 && !isPlayingRef.current) {
-      const nextAudio = audioQueueRef.current.shift();
-      updateAudioQueueState();
-      playAudioChunk(nextAudio.data, nextAudio.mimeType);
-    } else {
-      updateAudioQueueState();
-    }
-  };
-
+  // Enhanced audio queueing with intelligent buffering
   const queueAudio = (audioData, mimeType) => {
-    audioQueueRef.current.push({ data: audioData, mimeType });
-    updateAudioQueueState();
-
-    if (!isPlayingRef.current) {
-      playNextAudio(); // Start immediately
-    }
+    if (!audioData || isMuted) return;
+    audioBufferRef.current.push({
+      data: audioData,
+      mimeType: mimeType || 'audio/pcm',
+      timestamp: Date.now()
+    });
+    setAudioQueueLength(audioBufferRef.current.length);
+    processAudioQueue();
   };
 
+  // Enhanced audio stopping with fade-out
   const stopCurrentAudio = () => {
-    if (currentAudioSourceRef.current) {
+    if (currentSourceRef.current) {
       try {
-        currentAudioSourceRef.current.stop();
+        // Fade out quickly to avoid clicks
+        const currentTime = audioContextRef.current.currentTime;
+        const fadeOutDuration = 0.01; // 10ms fade out
+        
+        if (crossfadeGainRef.current) {
+          crossfadeGainRef.current.gain.cancelScheduledValues(currentTime);
+          crossfadeGainRef.current.gain.setValueAtTime(
+            crossfadeGainRef.current.gain.value, 
+            currentTime
+          );
+          crossfadeGainRef.current.gain.linearRampToValueAtTime(0, currentTime + fadeOutDuration);
+        }
+        
+        setTimeout(() => {
+          if (currentSourceRef.current) {
+            currentSourceRef.current.stop();
+            currentSourceRef.current = null;
+          }
+        }, fadeOutDuration * 1000);
       } catch (error) {
         // Ignore stop errors
       }
     }
+
     isPlayingRef.current = false;
-    currentAudioSourceRef.current = null;
-    updateAudioQueueState();
+    setIsPlaying(false);
   };
 
   const clearAudioQueue = () => {
-    audioQueueRef.current = [];
+    audioBufferRef.current = [];
     stopCurrentAudio();
-    addLog("Audio queue cleared", "info");
-    updateAudioQueueState();
+    setAudioQueueLength(0);
+    addLog('Audio queue cleared', 'info');
   };
 
+  // Enhanced connection with better error handling
   const connectToBackend = async () => {
     try {
-      setConnectionStatus("connecting");
-      addLog("Connecting to backend...", "info");
+      setConnectionStatus('connecting');
+      addLog('Connecting to backend...', 'info');
 
-      // Ensure audio context is ready
       await initializeAudioContext();
       
       const wsUrl = 'ws://localhost:8000/audio';
@@ -221,15 +315,20 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
 
       wsRef.current.onopen = () => {
         setIsConnected(true);
-        setConnectionStatus("connected");
-        addLog("Connected successfully", "success");
+        setConnectionStatus('connected');
+        addLog('Connected successfully', 'success');
 
         const config = {
-          type: "setup",
+          type: 'setup',
           config: {
-            model: "models/gemini-2.5-flash-preview-native-audio-dialog",
-            response_modalities: ["AUDIO"],
-            voice_name: "Puck",
+            model: 'models/gemini-2.5-flash-preview-native-audio-dialog',
+            response_modalities: ['AUDIO'],
+            voice_name: 'Puck',
+            audio_config: {
+              sample_rate: AUDIO_CONFIG.sampleRate,
+              chunk_size: AUDIO_CONFIG.bufferSize,
+              enable_streaming: true
+            }
           },
         };
         wsRef.current.send(JSON.stringify(config));
@@ -238,95 +337,83 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('[WebSocket message]', data); // Log all incoming messages
+          
           switch (data.type) {
-            case "audio":
-              console.log("Received audio data");
+            case 'audio':
               if (data.audio_data && !isMuted) {
-                queueAudio(data.audio_data, data.mime_type || "audio/pcm");
+                queueAudio(data.audio_data, data.mime_type || 'audio/pcm');
               }
               break;
+              
             case 'transcript':
-              console.log('[transcript] Gemini:', data.text);
               addLog(`Gemini: ${data.text}`, 'ai-response');
               break;
+              
             case 'user_transcript':
-              console.log('[user_transcript] You:', data.text);
               addLog(`You: ${data.text}`, 'user-input');
               break;
+              
             case 'input_transcription':
-              // Accumulate input transcription chunks
               currentInputTranscriptRef.current += (data.text || '');
-              console.log('[input_transcription chunk]', data.text, '| Accumulated:', currentInputTranscriptRef.current);
-              // If this is the last chunk (data.final or data.is_final), finalize
               if (data.final || data.is_final) {
                 setInputTranscript(currentInputTranscriptRef.current);
-                analyzeDistressScore(currentInputTranscriptRef.current); // Analyze in parallel
+                analyzeDistressScore(currentInputTranscriptRef.current);
                 currentInputTranscriptRef.current = '';
-                console.log('[input_transcription] Finalized:', inputTranscript);
               }
               break;
+              
             case 'output_transcription':
-              // Accumulate output transcription chunks
               currentOutputTranscriptRef.current += (data.text || '');
-              console.log('[output_transcription chunk]', data.text, '| Accumulated:', currentOutputTranscriptRef.current);
-              // If this is the last chunk (data.final or data.is_final), finalize
               if (data.final || data.is_final) {
                 setOutputTranscript(currentOutputTranscriptRef.current);
                 currentOutputTranscriptRef.current = '';
-                console.log('[output_transcription] Finalized:', outputTranscript);
               }
               break;
+              
             case 'info':
-              console.log('[info]', data.message);
               addLog(data.message, 'info');
               break;
+              
             case 'turnComplete':
-              // On turnComplete, finalize any remaining accumulated transcripts
               if (currentInputTranscriptRef.current) {
                 setInputTranscript(currentInputTranscriptRef.current);
-                analyzeDistressScore(currentInputTranscriptRef.current); // Analyze in parallel
+                analyzeDistressScore(currentInputTranscriptRef.current);
                 currentInputTranscriptRef.current = '';
-                console.log('[turnComplete] Finalizing input transcript:', currentInputTranscriptRef.current);
               }
               if (currentOutputTranscriptRef.current) {
                 setOutputTranscript(currentOutputTranscriptRef.current);
-                console.log('[turnComplete] Finalizing output transcript:', currentOutputTranscriptRef.current);
                 currentOutputTranscriptRef.current = '';
               }
-              addLog(`[turnComplete event] Finalizing transcripts`, 'success');
+              addLog('Turn completed', 'success');
               break;
+              
             case 'error':
-              console.error('[error]', data.message);
               addLog(`Error: ${data.message}`, 'error');
               break;
+              
             default:
               console.log('[unhandled message type]', data);
               break;
           }
         } catch (error) {
-          console.error('[Message parsing error]', error);
           addLog(`Message parsing error: ${error.message}`, 'error');
         }
       };
 
       wsRef.current.onerror = (error) => {
-        addLog(`WebSocket error`, "error");
-        setConnectionStatus("error");
+        addLog('WebSocket error', 'error');
+        setConnectionStatus('error');
       };
 
       wsRef.current.onclose = (event) => {
         setIsConnected(false);
-        setConnectionStatus("disconnected");
-        addLog(
-          `Disconnected: ${event.reason || "Connection closed"}`,
-          "warning"
-        );
+        setConnectionStatus('disconnected');
+        addLog(`Disconnected: ${event.reason || 'Connection closed'}`, 'warning');
         clearAudioQueue();
       };
     } catch (error) {
-      addLog(`Connection error: ${error.message}`, "error");
-      setConnectionStatus("error");
+      addLog(`Connection error: ${error.message}`, 'error');
+      setConnectionStatus('error');
     }
   };
 
@@ -342,9 +429,11 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
     clearAudioQueue();
   };
 
+  // Enhanced recording with better audio processing
   const startRecording = async () => {
     currentInputTranscriptRef.current = '';
     currentOutputTranscriptRef.current = '';
+    
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -353,18 +442,19 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          latency: 0.01 // Low latency
         },
       });
 
       streamRef.current = stream;
 
-      const inputAudioContext = new (window.AudioContext ||
-        window.webkitAudioContext)({
+      const inputAudioContext = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: 16000,
+        latencyHint: 'interactive'
       });
 
       const source = inputAudioContext.createMediaStreamSource(stream);
-      const processor = inputAudioContext.createScriptProcessor(4096, 1, 1);
+      const processor = inputAudioContext.createScriptProcessor(2048, 1, 1); // Smaller buffer for lower latency
 
       audioChunksRef.current = [];
 
@@ -383,7 +473,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       };
 
       setIsRecording(true);
-      addLog("Recording started (16kHz)", "success");
+      addLog('Recording started (16kHz, low latency)', 'success');
 
       // Auto-stop after 5 seconds
       recordingTimeoutRef.current = setTimeout(() => {
@@ -392,16 +482,16 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
         }
       }, 5000);
     } catch (error) {
-      addLog(`Recording error: ${error.message}`, "error");
+      addLog(`Recording error: ${error.message}`, 'error');
     }
   };
 
-  // --- Emotion capture logic (real backend integration) ---
+  // Rest of the emotion detection logic remains the same...
   useEffect(() => {
     let interval = null;
     let ws = null;
+    
     if (!emotionDetectionEnabled) {
-      // Stop webcam if running
       if (webcamStreamRef.current) {
         webcamStreamRef.current.getTracks().forEach(track => track.stop());
         webcamStreamRef.current = null;
@@ -413,7 +503,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       }
       return;
     }
-    // Start webcam
+
     navigator.mediaDevices
       .getUserMedia({ video: true })
       .then((stream) => {
@@ -422,13 +512,14 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
-        // Open emotion WebSocket
+        
         ws = new WebSocket('ws://localhost:8000/');
         setEmotionWs(ws);
+        
         ws.onopen = () => {
-          // Send setup message if needed by backend
           ws.send(JSON.stringify({ setup: { mode: 'emotion' } }));
         };
+        
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
@@ -437,12 +528,15 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
             }
           } catch (e) {}
         };
+        
         ws.onerror = (e) => {
           setCameraPermission(false);
         };
+        
         ws.onclose = () => {
           setEmotionWs(null);
         };
+        
         interval = setInterval(() => {
           const canvas = canvasRef.current;
           const video = videoRef.current;
@@ -466,7 +560,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
         if (ws) ws.close();
         console.error('Error accessing webcam:', err);
       });
-    // Cleanup on unmount or disable
+
     return () => {
       if (interval) clearInterval(interval);
       if (webcamStreamRef.current) {
@@ -478,7 +572,6 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
     };
   }, [emotionDetectionEnabled]);
 
-  // --- TTS to PCM using Web Audio API ---
   const synthesizeEmotionPCM = async (emotionText) => {
     return new Promise((resolve, reject) => {
       try {
@@ -486,26 +579,26 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
         const utter = new window.SpeechSynthesisUtterance(emotionText);
         utter.lang = 'en-US';
         let dest = audioCtx.createMediaStreamDestination();
+        
         utter.onend = async () => {
-          // Record the TTS output
           const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm' });
           let chunks = [];
+          
           recorder.ondataavailable = (e) => chunks.push(e.data);
           recorder.onstop = async () => {
             const blob = new Blob(chunks, { type: 'audio/webm' });
             const arrayBuffer = await blob.arrayBuffer();
-            // Decode to PCM
+            
             let audioBuffer;
             try {
               audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
             } catch (e) {
-              resolve(null); // decoding failed
+              resolve(null);
               return;
             }
-            // Resample to 16kHz mono if needed
+            
             let pcm = audioBuffer.getChannelData(0);
             if (audioBuffer.sampleRate !== 16000) {
-              // Simple resample (linear interpolation)
               const ratio = audioBuffer.sampleRate / 16000;
               const newLength = Math.floor(pcm.length / ratio);
               const resampled = new Float32Array(newLength);
@@ -520,9 +613,11 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
             }
             resolve(new Float32Array(pcm));
           };
+          
           recorder.start();
-          setTimeout(() => recorder.stop(), 1000); // Record for 1s (adjust as needed)
+          setTimeout(() => recorder.stop(), 1000);
         };
+        
         window.speechSynthesis.speak(utter);
       } catch (err) {
         reject(err);
@@ -535,6 +630,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       clearTimeout(recordingTimeoutRef.current);
       recordingTimeoutRef.current = null;
     }
+    
     if (audioProcessorRef.current) {
       try {
         audioProcessorRef.current.processor.disconnect();
@@ -542,22 +638,30 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
         audioProcessorRef.current.context.close();
       } catch (error) {}
     }
+    
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    
     setIsRecording(false);
+    
     if (audioChunksRef.current.length > 0) {
       let totalSamples = 0;
       audioChunksRef.current.forEach(chunk => { totalSamples += chunk.length; });
+      
       const combinedPCM = new Float32Array(totalSamples);
       let offset = 0;
-      audioChunksRef.current.forEach(chunk => { combinedPCM.set(chunk, offset); offset += chunk.length; });
-      // Synthesize emotion TTS to PCM and prepend
+      audioChunksRef.current.forEach(chunk => { 
+        combinedPCM.set(chunk, offset); 
+        offset += chunk.length; 
+      });
+      
       let emotionText = '';
       if (emotionDetectionEnabled && emotion.aggregated) {
         emotionText = `The user's emotion is: ${emotion.aggregated}`;
       }
+      
       let ttsPCM = null;
       try {
         if (emotionText) {
@@ -566,6 +670,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       } catch (err) {
         addLog('TTS error, sending only user audio', 'error');
       }
+      
       let finalPCM;
       if (ttsPCM && ttsPCM.length > 0 && !isNaN(ttsPCM[0])) {
         finalPCM = new Float32Array(ttsPCM.length + combinedPCM.length);
@@ -574,10 +679,12 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       } else {
         finalPCM = combinedPCM;
       }
+      
       const base64Data = convertPCMToBase64(finalPCM);
+      
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const message = {
-          type: "audio_input",
+          type: 'audio_input',
           audio_data: base64Data,
           emotion: emotionDetectionEnabled ? emotion.aggregated : '',
           format: 'pcm',
@@ -589,25 +696,26 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
         addLog(`Audio sent (${(finalPCM.length / 16000).toFixed(2)}s) with emotion: ${emotionDetectionEnabled ? emotion.aggregated : 'none'}`, 'user-input');
       }
     }
+    
     audioChunksRef.current = [];
     audioProcessorRef.current = null;
   };
 
-  // Analyze distress score using Gemini API (runs in parallel)
   const analyzeDistressScore = async (inputText) => {
     if (!inputText || inputText.trim() === '') return;
+    
     try {
       addLog('Analyzing distress score...', 'info');
-      // Replace this URL with your actual Gemini text API endpoint
       const response = await fetch('http://localhost:8000/api/distress-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText })
       });
+      
       if (!response.ok) throw new Error('API error');
+      
       const data = await response.json();
-      setDistress(data.score); // Fix: set only the score, not the whole object
-      console.log(data.score)
+      setDistress(data.score);
     } catch (err) {
       addLog('Distress score analysis failed', 'error');
     }
@@ -616,18 +724,28 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
   const toggleMute = () => {
     const newMutedState = !isMuted;
     setIsMuted(newMutedState);
-    addLog(`Audio ${newMutedState ? "muted" : "unmuted"}`, "info");
+    addLog(`Audio ${newMutedState ? 'muted' : 'unmuted'}`, 'info');
 
-    if (newMutedState && isPlayingRef.current) {
-      stopCurrentAudio();
+    if (masterGainRef.current) {
+      const currentTime = audioContextRef.current.currentTime;
+      masterGainRef.current.gain.cancelScheduledValues(currentTime);
+      masterGainRef.current.gain.setValueAtTime(
+        masterGainRef.current.gain.value,
+        currentTime
+      );
+      masterGainRef.current.gain.linearRampToValueAtTime(
+        newMutedState ? 0 : 1,
+        currentTime + 0.05
+      );
+    }
+
+    if (newMutedState) {
+      clearAudioQueue();
     }
   };
 
   const handleUserInteraction = async () => {
-    if (
-      audioContextRef.current &&
-      audioContextRef.current.state === "suspended"
-    ) {
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
       await audioContextRef.current.resume();
     }
   };
@@ -635,12 +753,12 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
   useEffect(() => {
     initializeAudioContext();
 
-    document.addEventListener("click", handleUserInteraction);
-    document.addEventListener("keydown", handleUserInteraction);
+    document.addEventListener('click', handleUserInteraction);
+    document.addEventListener('keydown', handleUserInteraction);
 
     return () => {
-      document.removeEventListener("click", handleUserInteraction);
-      document.removeEventListener("keydown", handleUserInteraction);
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keydown', handleUserInteraction);
 
       if (recordingTimeoutRef.current) {
         clearTimeout(recordingTimeoutRef.current);
@@ -651,9 +769,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
           audioProcessorRef.current.processor.disconnect();
           audioProcessorRef.current.source.disconnect();
           audioProcessorRef.current.context.close();
-        } catch (error) {
-          // Ignore cleanup errors
-        }
+        } catch (error) {}
       }
 
       if (streamRef.current) {
@@ -674,16 +790,18 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
 
   const getStatusColor = () => {
     switch (connectionStatus) {
-      case "connected":
-        return "text-green-600";
-      case "connecting":
-        return "text-yellow-600";
-      case "error":
-        return "text-red-600";
+      case 'connected':
+        return 'text-green-600';
+      case 'connecting':
+        return 'text-yellow-600';
+      case 'error':
+        return 'text-red-600';
       default:
-        return "text-gray-600";
+        return 'text-gray-600';
     }
   };
+
+  
 
   const getLogTypeColor = (type) => {
     switch (type) {
@@ -763,9 +881,9 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
             setLog((prev) => prev + '\n' + data.message);
           } else if (data.type === 'audio') {
             setLog((prev) => prev + '\n[Audio data received]');
-            // Play audio immediately
+            // Use queueAudio for new audio system
             if (data.audio_data && !isMuted) {
-              playAudioChunk(data.audio_data, data.mime_type || 'audio/pcm');
+              queueAudio(data.audio_data, data.mime_type || 'audio/pcm');
             }
           } else {
             setLog((prev) => prev + '\n[Backend] ' + JSON.stringify(data));
