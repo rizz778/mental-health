@@ -168,24 +168,24 @@ async def websocket_endpoint(
                     logger.error(f"[Gemini] Invalid user_turns structure: {print.pformat(user_turns)}")
                     await websocket.send_json({"error": "Invalid message format for Gemini"}) 
 
-             # /Frame Handling for emotion in text messages    
-            elif "frame" in data:
-                try:
-                    frame_b64 = data["frame"]
-                    np_arr = np.frombuffer(base64.b64decode(frame_b64), np.uint8)
-                    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                    current_emotion = emotion_service.analyze_frame(frame)
-                    aggregated = emotion_service.get_aggregated_emotion()
-                    # Only log the captured emotion
-                    logger.info(f"[Emotion] Captured: current={current_emotion}, aggregated={aggregated}")
-                    await websocket.send_json({
-                        "emotion": {
-                            "current": current_emotion,
-                            "aggregated": aggregated
-                        }
-                    })
-                except Exception as e:
-                    await websocket.send_json({"error": "Emotion processing failed"})
+             # Emotion frame in Text messages
+            # elif "frame" in data:
+            #     try:
+            #         frame_b64 = data["frame"]
+            #         np_arr = np.frombuffer(base64.b64decode(frame_b64), np.uint8)
+            #         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            #         current_emotion = emotion_service.analyze_frame(frame)
+            #         aggregated = emotion_service.get_aggregated_emotion()
+            #         # Only log the captured emotion
+            #         logger.info(f"[Emotion] Captured: current={current_emotion}, aggregated={aggregated}")
+            #         await websocket.send_json({
+            #             "emotion": {
+            #                 "current": current_emotion,
+            #                 "aggregated": aggregated
+            #             }
+            #         })
+            #     except Exception as e:
+            #         await websocket.send_json({"error": "Emotion processing failed"})
             else:
                 await websocket.send_json({"error": "Unsupported message format"})
     
@@ -243,6 +243,7 @@ async def audio_websocket_endpoint(websocket: WebSocket):
                     })
                 except Exception as e:
                     await websocket.send_json({"error": "Emotion processing failed"})
+
             # --- Existing audio/text handling ---
             elif message.get("type") == "setup":
                 config = message.get("config", {})
