@@ -25,7 +25,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-
+import GeminiAudioChatModal from "../components/audio-test2";
 const { Header, Sider, Content } = Layout;
 
 // Backend URLs
@@ -49,6 +49,7 @@ const ChatPage = () => {
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isCameraTestVisible, setCameraTestVisible] = useState(false);
+  const [isAudioModalVisible, setIsAudioModalVisible] = useState(false);
 
   // Chat state
   const [chatSessions, setChatSessions] = useState([]);
@@ -58,7 +59,11 @@ const ChatPage = () => {
   const [userMessage, setUserMessage] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const [listening, setListening] = useState(false);
-
+  const [isCalling, setIsCalling] = useState(false);
+  // Use object for userProfile
+  const [userProfile, setUserProfile] = useState({});
+  // Remove conversationHistory state, use messages for history
+  // const [conversationHistory,setConversationHistory]=useState([])
   // Emotion and video refs
   const [emotion, setEmotion] = useState({ current: "", aggregated: "" });
   const videoRef = useRef(null);
@@ -69,7 +74,7 @@ const ChatPage = () => {
   const [messageInput, setMessageInput] = useState("");
   const [currentResponse, setCurrentResponse] = useState("");
   const currentResponseRef = useRef("");
-
+   
   // Config
   const [systemInstruction, setSystemInstruction] = useState(
     "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
@@ -95,6 +100,9 @@ const ChatPage = () => {
   const [shouldReconnect, setShouldReconnect] = useState(false);
 
   const [distressScore, setDistressScore] = useState(null);
+
+  // Audio conversation history state
+  const [audioConversationHistory, setAudioConversationHistory] = useState([]);
 
   // Emotion detection effect (Webcam + Gemini emotion via WebSocket)
   useEffect(() => {
@@ -435,6 +443,7 @@ const fetchSessions = async () => {
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, newMessage]);
+    setAudioConversationHistory((prev) => [...prev, newMessage]); // <-- append to audio history
   };
 
   const addSystemMessage = (content) => {
@@ -719,7 +728,7 @@ const fetchSessions = async () => {
       });
       const data = await res.json();
       if (data.messages) {
-        setMessages(data.messages.map((msg, idx) => {
+        const formattedMessages = data.messages.map((msg, idx) => {
           // Robustly map backend message fields to UI format
           let sender = 'system';
           if (msg.sender === 'user' || msg.type === 'user') sender = 'user';
@@ -735,15 +744,20 @@ const fetchSessions = async () => {
             text,
             content: text, // for compatibility
           };
-        }));
+        });
+        console.log('conversationHistory',formattedMessages)
+        setMessages(formattedMessages);
+        setAudioConversationHistory(formattedMessages); // <-- set audio history
         messageIdRef.current = data.messages.length + 1;
       } else {
         setMessages([]);
+        setAudioConversationHistory([]); // <-- clear audio history
         messageIdRef.current = 1;
       }
     } catch (err) {
       showError("Failed to fetch messages");
       setMessages([]);
+      setAudioConversationHistory([]); // <-- clear audio history
       messageIdRef.current = 1;
     }
   };
@@ -773,10 +787,13 @@ const fetchSessions = async () => {
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
-
+ useEffect(()=>{
+  fetchUserProfile();
+ })
   // When switching sessions, fetch messages from backend
   useEffect(() => {
     if (activeSession) {
+       
       fetchMessages(activeSession);
     }
   }, [activeSession]);
@@ -832,39 +849,19 @@ const fetchSessions = async () => {
         headers: { ...getAuthHeaders() },
       });
       if (!res.ok) throw new Error('Failed to fetch user profile');
-      return await res.json();
+      const data = await res.json();
+      setUserProfile(data);
     } catch (err) {
       console.error('Error fetching user profile:', err);
       return null;
     }
   };
 
-  // Fetch previous messages for a session
-  const fetchSessionMessages = async (sessionId) => {
-    try {
-      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}`, {
-        headers: { ...getAuthHeaders() },
-      });
-      if (!res.ok) throw new Error('Failed to fetch session messages');
-      const data = await res.json();
-      return data.messages || [];
-    } catch (err) {
-      console.error('Error fetching session messages:', err);
-      return [];
-    }
-  };
-
   // Gemini session setup with context (now async, fetches user profile and session messages)
   const setupGeminiSession = useCallback(async (sessionId) => {
     try {
-      // Fetch user profile and previous messages from backend
-      const [userProfile, sessionMessages] = await Promise.all([
-        fetchUserProfile(),
-        fetchSessionMessages(sessionId)
-      ]);
-
       // Prepare conversation history for Gemini
-      const conversation_history = (sessionMessages || []).map((msg) => ({
+      const conversation_history = (messages || []).map((msg) => ({
         sender: msg.sender,
         type: msg.type,
         text: msg.text || msg.content || '',
@@ -1001,7 +998,7 @@ const fetchSessions = async () => {
             <Button
               type="primary"
               icon={<PhoneOutlined />}
-              onClick={() => setIsModalVisible(true)}
+              onClick={() => setIsAudioModalVisible(true)}
               style={{
                 backgroundColor: "#007AFF",
                 borderColor: "#0056b3",
@@ -1011,7 +1008,7 @@ const fetchSessions = async () => {
                 height: "40px",
               }}
             >
-              {!collapsed && <span>Make a Call</span>}
+              {!collapsed && <span>Switch to Audio</span>}
             </Button>
 
             <Button
@@ -1174,34 +1171,12 @@ const fetchSessions = async () => {
         </Layout>
       </Layout>
 
-      {/* <Modal
-        title="Make a Call"
-        visible={isModalVisible}
-        onCancel={() => setIsModalVisible(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setIsModalVisible(false)}>
-            Cancel
-          </Button>,
-          <Button key="call" type="primary" onClick={handleCallUser}>
-            Call Now
-          </Button>,
-        ]}
-      > */}
-        {/* <p>Enter your phone number and message to receive a call:</p>
-        <Input
-          type="tel"
-          placeholder="Enter phone number"
-          value={phoneNumber}
-          onChange={(e) => setPhoneNumber(e.target.value)}
-        />
-        <Input
-          type="text"
-          placeholder="Enter message"
-          value={userMessage}
-          onChange={(e) => setUserMessage(e.target.value)}
-          style={{ marginTop: "10px" }}
-        />
-      </Modal> */}
+      <GeminiAudioChatModal
+        visible={isAudioModalVisible}
+        onClose={() => setIsAudioModalVisible(false)}
+        userProfile={userProfile}
+        conversationHistory={audioConversationHistory}
+      />
   
   </>
   );

@@ -237,28 +237,54 @@ audio_manager = AudioConnectionManager()
 
 @router.websocket("/audio")
 async def audio_websocket_endpoint(websocket: WebSocket):
-    
     try:
         await audio_manager.connect(websocket)
+        user_profile = None
+        conversation_history = None
+        session_cm = None
+        session = None
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            gemini_client = audio_manager.active_connections.get(websocket)
-            if not gemini_client:
-                await websocket.close(code=1008, reason="Gemini client not found")
-                break
-            if message["type"] == "setup":
+            # Handle setup with user profile and conversation history
+            if message.get("type") == "setup":
                 config = message.get("config", {})
-                await gemini_client.send_setup(config)
-            elif message["type"] == "audio_input":
+                # Extract user profile and conversation history
+                system_context = config.get("systemContext")
+                user_profile = None
+                conversation_history = None
+                if system_context:
+                    user_profile = system_context.get("user_profile")
+                    conversation_history = system_context.get("conversation_history")
+                # Compose system instruction
+                system_instruction = ""
+                if user_profile:
+                    system_instruction += f"User profile: {json.dumps(user_profile)}. "
+                if conversation_history and isinstance(conversation_history, list) and len(conversation_history) > 0:
+                    last_msgs = conversation_history[-5:] if len(conversation_history) > 5 else conversation_history
+                    history_str = "Conversation so far: " + " ".join(
+                        f"[{msg.get('sender','')}: {msg.get('text','')} ]" for msg in last_msgs
+                    )
+                    system_instruction += history_str
+                if system_instruction:
+                    config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
+                # Start Gemini session
+                gemini_client = audio_manager.active_connections.get(websocket)
+                if gemini_client:
+                    await gemini_client.send_setup(config)
+                await websocket.send_json({"type": "setup_complete"})
+            elif message.get("type") == "audio_input":
                 audio_data = message.get("audio_data", "")
                 if audio_data:
-                    await gemini_client.send_audio(audio_data)
-            elif message["type"] == "text_input":
+                    gemini_client = audio_manager.active_connections.get(websocket)
+                    if gemini_client:
+                        await gemini_client.send_audio(audio_data)
+            elif message.get("type") == "text_input":
                 text = message.get("text", "")
                 if text:
-                    await gemini_client.send_text(text)
-            else:
-                logger.warning(f"Unknown message type: {message['type']}")
+                    gemini_client = audio_manager.active_connections.get(websocket)
+                    if gemini_client:
+                        await gemini_client.send_text(text)
+            # else: just ignore unknown types
     except Exception:
         await audio_manager.disconnect(websocket)
