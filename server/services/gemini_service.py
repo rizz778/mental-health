@@ -3,10 +3,9 @@ import json
 import logging
 from xml.parsers.expat import model
 from google import genai
-import logging
 
-logger = logging.getLogger("gemini_service")
 
+logger = logging.getLogger(__name__)
 
 class GeminiService:
     def __init__(self, api_key, model="gemini-2.0-flash-live-001"):
@@ -16,7 +15,6 @@ class GeminiService:
     async def start_session(self, config, model=None):
         # Enable context window compression with a sliding window
         from google.genai import types
-        import types as pytypes
         # If config is a dict, build a LiveConnectConfig object
         if isinstance(config, dict):
             config = types.LiveConnectConfig(
@@ -32,11 +30,6 @@ class GeminiService:
         model_to_use = model or self.model
         session_cm = self.client.aio.live.connect(model=model_to_use, config=config)
         session = await session_cm.__aenter__()
-        # Defensive: Log and check type
-        if isinstance(session, pytypes.AsyncGeneratorType):
-            logger.error("[BUG] start_session returned async_generator! This should never happen.")
-        else:
-            logger.info(f"[GeminiService] start_session returned session of type: {type(session)}")
         return session, session_cm
 
     
@@ -64,9 +57,11 @@ class GeminiService:
         """Safely send data to websocket with proper error handling"""
         try:
             if not isinstance(data_dict, dict):
+                logger.error(f"[Gemini] Expected dict for websocket send, got {type(data_dict)} for client {client_id}")
                 return False
             
             if not websocket or not hasattr(websocket, 'send'):
+                logger.error(f"[Gemini] Invalid websocket object for client {client_id}")
                 return False
             
             # payload = json.dumps(data_dict)
@@ -74,6 +69,9 @@ class GeminiService:
             await websocket.send_json(data_dict)
             return True
         except Exception as e:
+            logger.error(f"[Gemini] Safe websocket send failed for {client_id}: {e}")
+            logger.error(f"[Gemini] Data being sent: {data_dict}")
+            logger.error(f"[Gemini] Websocket type: {type(websocket)}")
             return False
     
     async def receive_responses(self, session, websocket, client_id, active_sessions, api_key=None, config=None):
@@ -83,133 +81,142 @@ class GeminiService:
         """
         # Input validation
         if not websocket or not hasattr(websocket, 'send'):
+            logger.error(f"[Gemini] Invalid websocket object for client {client_id}")
             return
+            
         if not isinstance(client_id, str):
+            logger.error(f"[Gemini] Invalid client_id type: {type(client_id)}, value: {client_id}")
             return
+            
         if not isinstance(active_sessions, dict):
+            logger.error(f"[Gemini] Invalid active_sessions type: {type(active_sessions)}")
             return
+        
         try:
-            import types as pytypes
-            if isinstance(session, pytypes.AsyncGeneratorType):
-                logger.error(f"[GeminiService] ERROR: session is an async_generator, not a Gemini session object! Did you forget to await __aenter__()? client_id={client_id}")
-                await self._safe_websocket_send(websocket, client_id, {
-                    "type": "error",
-                    "message": "Internal server error: Gemini session not initialized properly."
-                })
-                return
-
-            # Use async for to support async generator from session.receive()
-            async for response in session.receive():
-                logger.info(f"[GeminiService] Received from Gemini: {response}")
-                
-                # Defensive: If response is bytes, decode to string
-                if isinstance(response, bytes):
-                    response_str = response.decode('utf-8', errors='replace')
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "error",
-                        "message": f"Unexpected Gemini API response: {response_str}"
-                    })
-                    continue
-                
-                # Defensive: If response is a string, log and skip
-                elif isinstance(response, str):
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "error",
-                        "message": f"Unexpected Gemini API response: {str(response)}"
-                    })
-                    continue
-                
-                # Print for all message types
-                elif hasattr(response, "session_resumption_update") and response.session_resumption_update:
-                    handle = response.session_resumption_update.new_handle
-                    resumable = response.session_resumption_update.resumable
-                    
-                    # FIXED: Double-check that active_sessions[client_id] is still a dict before accessing
-                    if not isinstance(active_sessions.get(client_id), dict):
-                        active_sessions[client_id] = {}
-                    
-                    active_sessions[client_id]["session_handle"] = handle
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "session_resumption_update",
-                        "handle": handle,
-                        "resumable": resumable
-                    })
-                
-                elif getattr(response, "go_away", None):
-                    print(f"[GeminiService] Received go_away for {client_id}: {response.go_away}")
-                    
-                    # FIXED: More robust handling of session_handle access
-                    session_handle = None
-                    client_data = active_sessions.get(client_id)
-                    if isinstance(client_data, dict):
-                        session_handle = client_data.get("session_handle")
-                    else:
-                        pass
-                    
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "session_warning",
-                        "message": f"Session ending in: {getattr(response.go_away, 'time_left', None)}",
-                        "go_away": str(response.go_away),
-                        "resume_handle": session_handle
-                    })
-                    break  # End loop on go_away
-                
-                elif getattr(response, "text", None) is not None:
-                    print(f"[GeminiService] Received text for {client_id}: {response.text}")
-                    print(response.text)
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "text_chunk",
-                        "content": response.text,
-                        "complete": False
-                    })
-                
-                elif getattr(response, "server_content", None):
-                    if response.server_content.generation_complete:
+            # FIXED: Ensure active_sessions[client_id] is properly initialized as a dict
+            # and handle the case where it might be a string or other type
+            if client_id not in active_sessions:
+                active_sessions[client_id] = {}
+            elif not isinstance(active_sessions[client_id], dict):
+                logger.warning(f"[Gemini] active_sessions[{client_id}] is not a dict, reinitializing: {type(active_sessions[client_id])}")
+                active_sessions[client_id] = {}
+            
+            while True:
+                async for response in session.receive():
+                    # Defensive: If response is bytes, decode to string
+                    if isinstance(response, bytes):
+                        response_str = response.decode('utf-8', errors='replace')
+                        logger.error(f"[Gemini] Received unexpected bytes response for {client_id}: {response_str}")
                         await self._safe_websocket_send(websocket, client_id, {
-                            "type": "generation_complete",
-                            "message": "Response generation completed"
+                            "type": "error",
+                            "message": f"Unexpected Gemini API response: {response_str}"
                         })
-                        break  # End loop on generation_complete
-                    
-                    # --- Forced reconnect/heartbeat logic removed ---
-                    # Only reconnect if go_away or error occurs
-                    if response.server_content.interrupted:
-                        await self._safe_websocket_send(websocket, client_id, {
-                            "type": "interrupted",
-                            "message": "Generation was interrupted"
-                        })
-                
-                elif hasattr(response, 'tool_call') and response.tool_call:
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "tool_call",
-                        "tool_call": str(response.tool_call)
-                    })
-                
-                elif getattr(response, "usage_metadata", None):
-                    usage = response.usage_metadata
-                    # Convert usage details to JSON-serializable format
-                    details = []
-                    for detail in getattr(usage, 'response_tokens_details', []):
-                        modality = getattr(detail, 'modality', 'unknown')
-                        # Convert enum to string if it's an enum
-                        if hasattr(modality, 'value'):
-                            modality = modality.value
-                        elif hasattr(modality, 'name'):
-                            modality = modality.name
-                        else:
-                            modality = str(modality)
+                        continue
                         
-                        details.append({
-                            "modality": modality,
-                            "token_count": getattr(detail, 'token_count', 0)
+                    # Defensive: If response is a string, log and skip
+                    elif isinstance(response, str):
+                        logger.error(f"[Gemini] Received unexpected string response for {client_id}: {response}")
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "error",
+                            "message": f"Unexpected Gemini API response: {str(response)}"
+                        })
+                        continue
+                    
+                    # Print for all message types
+                    elif hasattr(response, "session_resumption_update") and response.session_resumption_update:
+                        handle = response.session_resumption_update.new_handle
+                        resumable = response.session_resumption_update.resumable
+                        
+                        # FIXED: Double-check that active_sessions[client_id] is still a dict before accessing
+                        if not isinstance(active_sessions.get(client_id), dict):
+                            logger.warning(f"[Gemini] active_sessions[{client_id}] became non-dict, reinitializing")
+                            active_sessions[client_id] = {}
+                        
+                        active_sessions[client_id]["session_handle"] = handle
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "session_resumption_update",
+                            "handle": handle,
+                            "resumable": resumable
                         })
                     
-                    await self._safe_websocket_send(websocket, client_id, {
-                        "type": "usage_update",
-                        "total_tokens": usage.total_token_count,
-                        "details": details
-                    })
+                    elif getattr(response, "go_away", None):
+                        print(f"[GeminiService] Received go_away for {client_id}: {response.go_away}")
+                        
+                        # FIXED: More robust handling of session_handle access
+                        session_handle = None
+                        client_data = active_sessions.get(client_id)
+                        if isinstance(client_data, dict):
+                            session_handle = client_data.get("session_handle")
+                        else:
+                            logger.warning(f"[Gemini] active_sessions[{client_id}] is not a dict when accessing session_handle: {type(client_data)}")
+                        
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "session_warning",
+                            "message": f"Session ending in: {getattr(response.go_away, 'time_left', None)}",
+                            "go_away": str(response.go_away),
+                            "resume_handle": session_handle
+                        })
+                    
+                    elif getattr(response, "text", None) is not None:
+                        print(f"[GeminiService] Received text for {client_id}: {response.text}")
+                        print(response.text)
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "text_chunk",
+                            "content": response.text,
+                            "complete": False
+                        })
+                    
+                    elif getattr(response, "server_content", None):
+                        if response.server_content.generation_complete:
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "generation_complete",
+                                "message": "Response generation completed"
+                            })
+                            # --- Forced reconnect/heartbeat logic removed ---
+                            # Only reconnect if go_away or error occurs
+                        if response.server_content.interrupted:
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "interrupted",
+                                "message": "Generation was interrupted"
+                            })
+                    
+                    elif hasattr(response, 'tool_call') and response.tool_call:
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "tool_call",
+                            "tool_call": str(response.tool_call)
+                        })
+                    
+                    elif getattr(response, "usage_metadata", None):
+                        usage = response.usage_metadata
+                        # Convert usage details to JSON-serializable format
+                        details = []
+                        for detail in getattr(usage, 'response_tokens_details', []):
+                            modality = getattr(detail, 'modality', 'unknown')
+                            # Convert enum to string if it's an enum
+                            if hasattr(modality, 'value'):
+                                modality = modality.value
+                            elif hasattr(modality, 'name'):
+                                modality = modality.name
+                            else:
+                                modality = str(modality)
+                            
+                            details.append({
+                                "modality": modality,
+                                "token_count": getattr(detail, 'token_count', 0)
+                            })
+                        
+                        await self._safe_websocket_send(websocket, client_id, {
+                            "type": "usage_update",
+                            "total_tokens": usage.total_token_count,
+                            "details": details
+                        })
         except Exception as e:
+            logger.error(f"[Gemini] Error listening to Live API for {client_id}: {e}")
+            logger.error(f"[Gemini] Exception type: {type(e)}")
+            logger.error(f"[Gemini] WebSocket type: {type(websocket)}")
+            logger.error(f"[Gemini] Client ID type: {type(client_id)}")
+            logger.error(f"[Gemini] Active sessions type: {type(active_sessions)}")
+            
             # Try to send error message with extra safety
             error_message = str(e)
             await self._safe_websocket_send(websocket, client_id, {
