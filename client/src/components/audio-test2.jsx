@@ -50,9 +50,9 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
 
   // Audio configuration
   const AUDIO_CONFIG = {
-    sampleRate: 24000,
+    sampleRate: 24000, // Match backend sample rate
     bufferSize: 4096,
-    minBufferChunks: 3,
+    minBufferChunks: 5, // Buffer more chunks before playback
     maxBufferChunks: 10,
     crossfadeDuration: 0.05, // 50ms crossfade
     lookAheadTime: 0.1, // 100ms lookahead
@@ -69,7 +69,6 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
     if (audioContextReadyRef.current && audioContextRef.current?.state !== 'closed') {
       return;
     }
-
     try {
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: AUDIO_CONFIG.sampleRate,
@@ -122,134 +121,117 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
     return mimeType && (mimeType.startsWith('audio/pcm') || mimeType.includes('pcm'));
   };
 
-  // Enhanced audio buffer creation with resampling
+  // Simplified audio buffer creation with detailed logging
   const createAudioBuffer = async (audioData, mimeType) => {
     if (!audioContextRef.current) {
-      throw new Error('Audio context not initialized');
+      addLog('Audio context not initialized', 'error');
+      return null;
     }
-
     let audioBuffer;
-
-    if (isPCMFormat(mimeType)) {
-      // Optimized PCM processing
-      const binaryString = atob(audioData);
-      const uint8Array = new Uint8Array(binaryString.length);
-      
-      for (let i = 0; i < binaryString.length; i++) {
-        uint8Array[i] = binaryString.charCodeAt(i);
+    try {
+      if (isPCMFormat(mimeType)) {
+        const binaryString = atob(audioData);
+        const uint8Array = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          uint8Array[i] = binaryString.charCodeAt(i);
+        }
+        if (uint8Array.length % 2 !== 0) {
+          addLog('PCM data length is not even, possible corruption', 'error');
+          return null;
+        }
+        const int16Array = new Int16Array(uint8Array.buffer);
+        addLog('PCM first 10 samples: ' + Array.from(int16Array.slice(0, 10)).join(', '), 'info');
+        addLog(`PCM chunk length: ${int16Array.length}, expected sampleRate: ${AUDIO_CONFIG.sampleRate}`, 'info');
+        audioBuffer = audioContextRef.current.createBuffer(
+          1,
+          int16Array.length,
+          AUDIO_CONFIG.sampleRate
+        );
+        const channelData = audioBuffer.getChannelData(0);
+        for (let i = 0; i < int16Array.length; i++) {
+          channelData[i] = int16Array[i] / 32768.0;
+        }
+      } else {
+        const binaryString = atob(audioData);
+        const arrayBuffer = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          arrayBuffer[i] = binaryString.charCodeAt(i);
+        }
+        audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer.buffer);
       }
-      
-      const int16Array = new Int16Array(uint8Array.buffer);
-      const sampleCount = int16Array.length;
-      
-      audioBuffer = audioContextRef.current.createBuffer(
-        1, 
-        sampleCount, 
-        AUDIO_CONFIG.sampleRate
-      );
-      
-      const channelData = audioBuffer.getChannelData(0);
-      
-      // Optimized sample conversion
-      for (let i = 0; i < int16Array.length; i++) {
-        channelData[i] = int16Array[i] / 32768.0;
-      }
-    } else {
-      // Standard audio decoding
-      const binaryString = atob(audioData);
-      const arrayBuffer = new Uint8Array(binaryString.length);
-      
-      for (let i = 0; i < binaryString.length; i++) {
-        arrayBuffer[i] = binaryString.charCodeAt(i);
-      }
-      
-      audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer.buffer);
+      addLog(`AudioBuffer created: duration=${audioBuffer.duration.toFixed(3)}s, sampleRate=${audioBuffer.sampleRate}, length=${audioBuffer.length}`, 'info');
+      return audioBuffer;
+    } catch (err) {
+      addLog('createAudioBuffer error: ' + err.message, 'error');
+      return null;
     }
-
-    return audioBuffer;
   };
 
-  // Smooth audio scheduler with crossfading
-  const scheduleAudioPlayback = (audioBuffer, startTime = 0) => {
-    if (!audioContextRef.current || isMuted) return null;
-
-    const source = audioContextRef.current.createBufferSource();
-    const gainNode = audioContextRef.current.createGain();
-    
-    source.buffer = audioBuffer;
-    source.connect(gainNode);
-    gainNode.connect(crossfadeGainRef.current);
-
-    // Calculate when to start this audio
-    const currentTime = audioContextRef.current.currentTime;
-    const actualStartTime = Math.max(currentTime + AUDIO_CONFIG.lookAheadTime, startTime);
-
-    // Smooth fade-in to avoid clicks
-    gainNode.gain.setValueAtTime(0, actualStartTime);
-    gainNode.gain.linearRampToValueAtTime(1, actualStartTime + AUDIO_CONFIG.crossfadeDuration);
-    
-    // Smooth fade-out before ending
-    const endTime = actualStartTime + audioBuffer.duration;
-    gainNode.gain.setValueAtTime(1, endTime - AUDIO_CONFIG.crossfadeDuration);
-    gainNode.gain.linearRampToValueAtTime(0, endTime);
-
-    source.start(actualStartTime);
-    source.stop(endTime);
-
-    return {
-      source,
-      gainNode,
-      startTime: actualStartTime,
-      endTime,
-      duration: audioBuffer.duration
-    };
-  };
-
-  // Improved audio queue management: play one chunk at a time, always check for next chunk on end
+  // Simplified audio playback with crossfade and lookahead scheduling
   const processAudioQueue = async () => {
     if (isPlayingRef.current) return;
     if (audioBufferRef.current.length === 0) return;
-
-    // Optionally buffer a minimum number of chunks before starting
     if (!isPlaying && audioBufferRef.current.length < AUDIO_CONFIG.minBufferChunks) {
-      // Wait for more chunks to arrive
       setTimeout(processAudioQueue, 30);
       return;
     }
-
     try {
       isPlayingRef.current = true;
       setIsPlaying(true);
       const chunk = audioBufferRef.current.shift();
       setAudioQueueLength(audioBufferRef.current.length);
+      addLog(`Dequeued audio chunk. Remaining queue: ${audioBufferRef.current.length}`, 'info');
       const audioBuffer = await createAudioBuffer(chunk.data, chunk.mimeType);
-      const source = scheduleAudioPlayback(audioBuffer);
-      if (source) {
-        currentSourceRef.current = source.source;
-        source.source.onended = () => {
-          isPlayingRef.current = false;
-          setIsPlaying(false);
-          setAudioQueueLength(audioBufferRef.current.length);
-          // Immediately play next chunk if available
-          if (audioBufferRef.current.length > 0) {
-            processAudioQueue();
-          }
-        };
-        addLog(`Playing 1 chunk (${audioBuffer.duration.toFixed(2)}s)`, 'success');
-      } else {
+      if (!audioBuffer) {
+        addLog('Failed to create audio buffer, skipping chunk', 'error');
         isPlayingRef.current = false;
         setIsPlaying(false);
+        if (audioBufferRef.current.length > 0) setTimeout(processAudioQueue, 100);
+        return;
+      }
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      // Use crossfade gain for smooth transitions
+      source.connect(crossfadeGainRef.current);
+      // Crossfade logic
+      const now = audioContextRef.current.currentTime;
+      let startTime = now;
+      if (playbackStartTimeRef.current > now) {
+        startTime = playbackStartTimeRef.current;
+      }
+      // Schedule crossfade in
+      crossfadeGainRef.current.gain.cancelScheduledValues(startTime);
+      crossfadeGainRef.current.gain.setValueAtTime(0, startTime);
+      crossfadeGainRef.current.gain.linearRampToValueAtTime(1, startTime + AUDIO_CONFIG.crossfadeDuration);
+      // Schedule crossfade out for next chunk
+      source.onended = () => {
+        addLog('Audio chunk playback ended', 'info');
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+        setAudioQueueLength(audioBufferRef.current.length);
+        // Crossfade out
+        const endTime = audioContextRef.current.currentTime;
+        crossfadeGainRef.current.gain.cancelScheduledValues(endTime);
+        crossfadeGainRef.current.gain.setValueAtTime(1, endTime);
+        crossfadeGainRef.current.gain.linearRampToValueAtTime(0, endTime + AUDIO_CONFIG.crossfadeDuration);
+        if (audioBufferRef.current.length > 0) processAudioQueue();
+      };
+      addLog(`Starting playback: duration=${audioBuffer.duration.toFixed(3)}s (crossfade)`, 'success');
+      source.start(startTime);
+      // Schedule next chunk slightly before this one ends (lookahead)
+      playbackStartTimeRef.current = startTime + audioBuffer.duration - AUDIO_CONFIG.crossfadeDuration;
+      if (audioBufferRef.current.length > 0) {
+        setTimeout(processAudioQueue, (audioBuffer.duration - AUDIO_CONFIG.crossfadeDuration) * 1000);
       }
     } catch (error) {
-      addLog(`Audio processing error: ${error.message}`, 'error');
+      addLog('Audio processing/playback error: ' + error.message, 'error');
       isPlayingRef.current = false;
       setIsPlaying(false);
-      // Try next chunk if available
-      if (audioBufferRef.current.length > 0) {
-        setTimeout(processAudioQueue, 100);
-      }
+      if (audioBufferRef.current.length > 0) setTimeout(processAudioQueue, 100);
     }
   };
+
+  
 
   // Enhanced audio queueing with intelligent buffering
   const queueAudio = (audioData, mimeType) => {
