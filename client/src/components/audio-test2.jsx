@@ -2,7 +2,13 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff } from "lucide-react";
 import { Modal, Button, Alert } from "antd";
 
-const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHistory,sessionId}) => {
+const GeminiAudioChatModal = ({
+  visible,
+  onClose,
+  userProfile,
+  conversationHistory,
+  sessionId,
+}) => {
   const [isCalling, setIsCalling] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -100,8 +106,6 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       addLog(`Audio context error: ${error.message}`, "error");
     }
   };
-
-
 
   const isPCMFormat = (mimeType) => {
     return (
@@ -258,7 +262,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
   };
 
   // Store last detected emotion for playback
-  const lastEmotionRef = useRef('');
+  const lastEmotionRef = useRef("");
 
   // Synthesize a short TTS tag for emotion (optional, can be toggled)
   const synthesizeEmotionTag = async (emotionText) => {
@@ -269,7 +273,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
         return convertPCMToBase64(ttsPCM);
       }
     } catch (err) {
-      addLog('Emotion TTS error: ' + err.message, 'error');
+      addLog("Emotion TTS error: " + err.message, "error");
     }
     return null;
   };
@@ -281,24 +285,24 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
     if (emotionTag && emotionTag !== lastEmotionRef.current) {
       lastEmotionRef.current = emotionTag;
       setEmotion((prev) => ({ ...prev, playback: emotionTag }));
-      addLog(`Emotion detected in audio: ${emotionTag}`, 'ai-response');
+      addLog(`Emotion detected in audio: ${emotionTag}`, "ai-response");
       // Optionally synthesize and queue TTS tag
       const ttsBase64 = await synthesizeEmotionTag(emotionTag);
       if (ttsBase64) {
         audioBufferRef.current.push({
           data: ttsBase64,
-          mimeType: 'audio/pcm',
+          mimeType: "audio/pcm",
           timestamp: Date.now(),
           isEmotionTag: true,
-          emotion: emotionTag
+          emotion: emotionTag,
         });
       }
     }
     audioBufferRef.current.push({
       data: audioData,
-      mimeType: mimeType || 'audio/pcm',
+      mimeType: mimeType || "audio/pcm",
       timestamp: Date.now(),
-      emotion: emotionTag || lastEmotionRef.current
+      emotion: emotionTag || lastEmotionRef.current,
     });
     setAudioQueueLength(audioBufferRef.current.length);
     processAudioQueue();
@@ -349,34 +353,42 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
   // Enhanced connection with better error handling
   const connectToBackend = async () => {
     setIsCalling(true);
-    setLog('');
-    setConnectionStatus('connecting');
+    setLog("");
+    setConnectionStatus("connecting");
     if (!userProfile || Object.keys(userProfile).length === 0) {
-      setLog('User profile is missing or empty. Cannot start audio call.');
-      setConnectionStatus('error');
+      setLog("User profile is missing or empty. Cannot start audio call.");
+      setConnectionStatus("error");
       setIsCalling(false);
-      console.warn('GeminiAudioChatModal: userProfile is missing or empty', userProfile);
+      console.warn(
+        "GeminiAudioChatModal: userProfile is missing or empty",
+        userProfile
+      );
       return;
     }
     if (!conversationHistory) {
-      setLog('Conversation history is missing or empty. Cannot start audio call.');
-      setConnectionStatus('error');
+      setLog(
+        "Conversation history is missing or empty. Cannot start audio call."
+      );
+      setConnectionStatus("error");
       setIsCalling(false);
-      console.warn('GeminiAudioChatModal: conversationHistory is missing or empty', conversationHistory);
+      console.warn(
+        "GeminiAudioChatModal: conversationHistory is missing or empty",
+        conversationHistory
+      );
       return;
     }
     try {
-      wsRef.current = new window.WebSocket('ws://localhost:8000/audio');
+      wsRef.current = new window.WebSocket("ws://localhost:8000/audio");
       wsRef.current.onopen = () => {
-        setConnectionStatus('connected');
-        setLog('Connected to audio backend. Sending setup...');
+        setConnectionStatus("connected");
+        setLog("Connected to audio backend. Sending setup...");
         wsRef.current.send(
           JSON.stringify({
-            type: 'setup',
+            type: "setup",
             config: {
-              model: 'models/gemini-2.5-flash-preview-native-audio-dialog',
-              response_modalities: ['AUDIO'],
-              voice_name: 'Puck',
+              model: "models/gemini-2.5-flash-preview-native-audio-dialog",
+              response_modalities: ["AUDIO"],
+              voice_name: "Puck",
               systemContext: {
                 user_profile: userProfile,
                 conversation_history: conversationHistory,
@@ -391,67 +403,71 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
           const data = JSON.parse(event.data);
 
           switch (data.type) {
-
-            case 'setup_complete':
-               setLog('Audio session setup complete. You can now talk!');
-            case 'audio':
+            case "setup_complete":
+              setLog("Audio session setup complete. You can now talk!");
+            case "audio":
               if (data.audio_data && !isMuted) {
                 // Pass emotion if present
-                queueAudio(data.audio_data, data.mime_type || 'audio/pcm', data.emotion);
+                queueAudio(
+                  data.audio_data,
+                  data.mime_type || "audio/pcm",
+                  data.emotion
+                );
               }
               break;
-              
-              
-            case 'input_transcription':
-              currentInputTranscriptRef.current += (data.text || '');
-              break;
-              
-            case 'output_transcription':
-              currentOutputTranscriptRef.current += (data.text || '');
+
+            case "input_transcription":
+              currentInputTranscriptRef.current += data.text || "";
               break;
 
-              
-            case 'turnComplete':
-              console.log('Turn   Completed')
-               const currentEmotion = emotion.aggregated;
-               const currentDistress = distress;
+            case "output_transcription":
+              currentOutputTranscriptRef.current += data.text || "";
+              break;
+
+            case "turnComplete":
+              console.log("Turn   Completed");
+              const currentEmotion = emotion.aggregated;
+              const currentDistress = distress;
               if (currentInputTranscriptRef.current) {
                 setInputTranscript(currentInputTranscriptRef.current);
                 analyzeDistressScore(currentInputTranscriptRef.current);
                 const savedEmotion = recordingEmotionRef.current;
                 const savedDistress = recordingDistressRef.current;
                 // Log emotion and distress before saving
-                console.log('[saveMessage] User Emotion:', currentEmotion);
-                console.log('[saveMessage] User Distress:', currentDistress);
-                addLog(`[saveMessage] User Emotion: ${savedEmotion}`, 'info');
-                addLog(`[saveMessage] User Distress: ${savedDistress}`, 'info');
-                const saveResult=saveMessage(sessionId, {
-                  sender: 'user',
-                  type: 'user',
+                console.log("[saveMessage] User Emotion:", currentEmotion);
+                console.log("[saveMessage] User Distress:", currentDistress);
+                addLog(`[saveMessage] User Emotion: ${savedEmotion}`, "info");
+                addLog(`[saveMessage] User Distress: ${savedDistress}`, "info");
+                const saveResult = saveMessage(sessionId, {
+                  sender: "user",
+                  type: "user",
                   text: currentInputTranscriptRef.current,
                   emotion: savedEmotion,
-                  distress: savedDistress,
+                  distressScore: savedDistress,
                   timestamp: new Date().toISOString(),
                 });
-                if(saveResult){
-                  addLog('User message saved successfully', 'success');
+                if (saveResult) {
+                  addLog("User message saved successfully", "success");
                 }
-                currentInputTranscriptRef.current = '';
+                currentInputTranscriptRef.current = "";
               }
               if (currentOutputTranscriptRef.current) {
                 setOutputTranscript(currentOutputTranscriptRef.current);
                 console.log("output:", outputTranscript);
-                addLog(`[saveMessage] Model Output: ${outputTranscript}`, 'info');
-                const saveResult=saveMessage(sessionId, {
-                  sender:"bot",
-                  type: 'model',
+                addLog(
+                  `[saveMessage] Model Output: ${outputTranscript}`,
+                  "info"
+                );
+                const saveResult = saveMessage(sessionId, {
+                  sender: "bot",
+                  type: "model",
                   text: currentOutputTranscriptRef.current,
                   timestamp: new Date().toISOString(),
                 });
-                if(saveResult){
-                   addLog('Model message saved successfully', 'success');
+                if (saveResult) {
+                  addLog("Model message saved successfully", "success");
                 }
-                currentOutputTranscriptRef.current = '';
+                currentOutputTranscriptRef.current = "";
               }
               addLog("Turn completed", "success");
               break;
@@ -488,43 +504,51 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       setConnectionStatus("error");
     }
   };
-   const getAuthHeaders = () => {
+  const getAuthHeaders = () => {
     const token = localStorage.getItem("token");
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
-   // Fixed saveMessage function
-const saveMessage = async (sessionId, message) => {
-  try {
-    console.log('[saveMessage] Attempting to save:', message);
-    console.log('[saveMessage] Session ID:', sessionId);
-    
-    const response = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders(),
-      },
-      body: JSON.stringify(message)
-    });
+  // Fixed saveMessage function
+  const saveMessage = async (sessionId, message) => {
+    try {
+      console.log("[saveMessage] Attempting to save:", message);
+      console.log("[saveMessage] Session ID:", sessionId);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[saveMessage] Backend responded with status ${response.status}:`, errorText);
-      addLog(`Failed to save message: ${response.status} - ${errorText}`, 'error');
+      const response = await fetch(
+        `${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify(message),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(
+          `[saveMessage] Backend responded with status ${response.status}:`,
+          errorText
+        );
+        addLog(
+          `Failed to save message: ${response.status} - ${errorText}`,
+          "error"
+        );
+        return false;
+      }
+
+      const result = await response.json();
+      console.log("[saveMessage] Successfully saved:", result);
+      addLog("Message saved successfully", "success");
+      return true;
+    } catch (err) {
+      console.error("[saveMessage] Network/parsing error:", err);
+      addLog(`Save message error: ${err.message}`, "error");
       return false;
     }
-
-    const result = await response.json();
-    console.log('[saveMessage] Successfully saved:', result);
-    addLog('Message saved successfully', 'success');
-    return true;
-    
-  } catch (err) {
-    console.error("[saveMessage] Network/parsing error:", err);
-    addLog(`Save message error: ${err.message}`, 'error');
-    return false;
-  }
-};
+  };
   const disconnect = () => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -596,7 +620,7 @@ const saveMessage = async (sessionId, message) => {
   };
 
   // Rest of the emotion detection logic remains the same...
- useEffect(() => {
+  useEffect(() => {
     if (!emotionDetectionEnabled) return;
     let ws;
     let interval;
@@ -635,20 +659,20 @@ const saveMessage = async (sessionId, message) => {
           videoRef.current.srcObject = mediaStream;
         }
         interval = setInterval(() => {
-          if (!ws || ws.readyState !== WebSocket.OPEN){
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
             console.log("WebSocket not open");
             return;
           }
           const canvas = canvasRef.current;
           const video = videoRef.current;
-           if (!canvas) {
+          if (!canvas) {
             console.log("Canvas not available");
             return;
           }
           if (!video) {
-    console.log("Video not available");
-    return;
-  }
+            console.log("Video not available");
+            return;
+          }
           if (canvas && video) {
             const ctx = canvas.getContext("2d");
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -671,194 +695,196 @@ const saveMessage = async (sessionId, message) => {
     };
   }, [emotionDetectionEnabled]);
 
-const synthesizeEmotionPCM = async (emotionText) => {
-  return new Promise((resolve, reject) => {
-    try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)(
-        { sampleRate: 16000 }
-      );
-      const utter = new window.SpeechSynthesisUtterance(emotionText);
-      utter.lang = "en-US";
-      
-      // Create a gain node to capture the audio
-      const gainNode = audioCtx.createGain();
-      const dest = audioCtx.createMediaStreamDestination();
-      gainNode.connect(dest);
+  const synthesizeEmotionPCM = async (emotionText) => {
+    return new Promise((resolve, reject) => {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)(
+          { sampleRate: 16000 }
+        );
+        const utter = new window.SpeechSynthesisUtterance(emotionText);
+        utter.lang = "en-US";
 
-      utter.onend = async () => {
-        try {
-          // Use webm format as PCM is not widely supported
-          const recorder = new MediaRecorder(dest.stream, {
-            mimeType: "audio/webm;codecs=opus",
-          });
-          let chunks = [];
+        // Create a gain node to capture the audio
+        const gainNode = audioCtx.createGain();
+        const dest = audioCtx.createMediaStreamDestination();
+        gainNode.connect(dest);
 
-          recorder.ondataavailable = (e) => chunks.push(e.data);
-          recorder.onstop = async () => {
-            const blob = new Blob(chunks, { type: "audio/webm" });
-            const arrayBuffer = await blob.arrayBuffer();
+        utter.onend = async () => {
+          try {
+            // Use webm format as PCM is not widely supported
+            const recorder = new MediaRecorder(dest.stream, {
+              mimeType: "audio/webm;codecs=opus",
+            });
+            let chunks = [];
 
-            let audioBuffer;
-            try {
-              audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            } catch (e) {
-              resolve(null);
-              return;
-            }
+            recorder.ondataavailable = (e) => chunks.push(e.data);
+            recorder.onstop = async () => {
+              const blob = new Blob(chunks, { type: "audio/webm" });
+              const arrayBuffer = await blob.arrayBuffer();
 
-            let pcm = audioBuffer.getChannelData(0);
-            
-            // Resample to 16kHz if needed
-            if (audioBuffer.sampleRate !== 16000) {
-              const ratio = audioBuffer.sampleRate / 16000;
-              const newLength = Math.floor(pcm.length / ratio);
-              const resampled = new Float32Array(newLength);
-              for (let i = 0; i < newLength; i++) {
-                const idx = i * ratio;
-                const idxLow = Math.floor(idx);
-                const idxHigh = Math.min(Math.ceil(idx), pcm.length - 1);
-                const weight = idx - idxLow;
-                resampled[i] =
-                  (1 - weight) * pcm[idxLow] + weight * pcm[idxHigh];
+              let audioBuffer;
+              try {
+                audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+              } catch (e) {
+                resolve(null);
+                return;
               }
-              pcm = resampled;
-            }
-            
-            // Convert to 16-bit PCM
-            const pcm16 = convertTo16BitPCM(pcm);
-            resolve(pcm16);
-          };
 
-          recorder.start();
-          setTimeout(() => recorder.stop(), 1000);
-        } catch (err) {
-          reject(err);
-        }
-      };
+              let pcm = audioBuffer.getChannelData(0);
 
-      window.speechSynthesis.speak(utter);
-    } catch (err) {
-      reject(err);
-    }
-  });
-};
+              // Resample to 16kHz if needed
+              if (audioBuffer.sampleRate !== 16000) {
+                const ratio = audioBuffer.sampleRate / 16000;
+                const newLength = Math.floor(pcm.length / ratio);
+                const resampled = new Float32Array(newLength);
+                for (let i = 0; i < newLength; i++) {
+                  const idx = i * ratio;
+                  const idxLow = Math.floor(idx);
+                  const idxHigh = Math.min(Math.ceil(idx), pcm.length - 1);
+                  const weight = idx - idxLow;
+                  resampled[i] =
+                    (1 - weight) * pcm[idxLow] + weight * pcm[idxHigh];
+                }
+                pcm = resampled;
+              }
 
-// Convert Float32Array to 16-bit PCM
-const convertTo16BitPCM = (float32Array) => {
-  const int16Array = new Int16Array(float32Array.length);
-  for (let i = 0; i < float32Array.length; i++) {
-    // Clamp values to [-1, 1] and convert to 16-bit
-    const sample = Math.max(-1, Math.min(1, float32Array[i]));
-    int16Array[i] = sample * 32767; // Convert to 16-bit range
-  }
-  return int16Array;
-};
+              // Convert to 16-bit PCM
+              const pcm16 = convertTo16BitPCM(pcm);
+              resolve(pcm16);
+            };
 
-// Convert 16-bit PCM to base64
-const convertPCMToBase64 = (pcmData) => {
-  const uint8Array = new Uint8Array(pcmData.buffer);
-  let binary = '';
-  for (let i = 0; i < uint8Array.length; i++) {
-    binary += String.fromCharCode(uint8Array[i]);
-  }
-  return btoa(binary);
-};
+            recorder.start();
+            setTimeout(() => recorder.stop(), 1000);
+          } catch (err) {
+            reject(err);
+          }
+        };
 
-const recordingEmotionRef = useRef('');
-const recordingDistressRef = useRef(0);
-
-const stopRecording = async () => {
-  if (recordingTimeoutRef.current) {
-    clearTimeout(recordingTimeoutRef.current);
-    recordingTimeoutRef.current = null;
-  }
-
-  if (audioProcessorRef.current) {
-    try {
-      audioProcessorRef.current.processor.disconnect();
-      audioProcessorRef.current.source.disconnect();
-      audioProcessorRef.current.context.close();
-    } catch (error) {}
-  }
-
-  if (streamRef.current) {
-    streamRef.current.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-  }
-
-  setIsRecording(false);
-
-  if (audioChunksRef.current.length > 0) {
-    let totalSamples = 0;
-    audioChunksRef.current.forEach((chunk) => {
-      totalSamples += chunk.length;
-    });
-
-    const combinedPCM = new Float32Array(totalSamples);
-    let offset = 0;
-    audioChunksRef.current.forEach((chunk) => {
-      combinedPCM.set(chunk, offset);
-      offset += chunk.length;
-    });
-
-    const currentEmotion = emotionDetectionEnabled ? emotion.aggregated || '' : '';
-    recordingEmotionRef.current = currentEmotion;
-
-    let emotionText = "";
-    if (emotionDetectionEnabled && emotion.aggregated) {
-      emotionText = `The user's facial  emotion is: ${emotion.aggregated}`;
-    }
-
-    let ttsPCM = null;
-    try {
-      if (emotionText) {
-        ttsPCM = await synthesizeEmotionPCM(emotionText);
+        window.speechSynthesis.speak(utter);
+      } catch (err) {
+        reject(err);
       }
-    } catch (err) {
-      addLog("TTS error, sending only user audio", "error");
+    });
+  };
+
+  // Convert Float32Array to 16-bit PCM
+  const convertTo16BitPCM = (float32Array) => {
+    const int16Array = new Int16Array(float32Array.length);
+    for (let i = 0; i < float32Array.length; i++) {
+      // Clamp values to [-1, 1] and convert to 16-bit
+      const sample = Math.max(-1, Math.min(1, float32Array[i]));
+      int16Array[i] = sample * 32767; // Convert to 16-bit range
+    }
+    return int16Array;
+  };
+
+  // Convert 16-bit PCM to base64
+  const convertPCMToBase64 = (pcmData) => {
+    const uint8Array = new Uint8Array(pcmData.buffer);
+    let binary = "";
+    for (let i = 0; i < uint8Array.length; i++) {
+      binary += String.fromCharCode(uint8Array[i]);
+    }
+    return btoa(binary);
+  };
+
+  const recordingEmotionRef = useRef("");
+  const recordingDistressRef = useRef(0);
+
+  const stopRecording = async () => {
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
     }
 
-    // Convert user audio to 16-bit PCM
-    const userPCM16 = convertTo16BitPCM(combinedPCM);
-    
-    let finalPCM;
-    if (ttsPCM && ttsPCM.length > 0) {
-      // Combine TTS and user audio (both now in 16-bit format)
-      finalPCM = new Int16Array(ttsPCM.length + userPCM16.length);
-      finalPCM.set(ttsPCM, 0);
-      finalPCM.set(userPCM16, ttsPCM.length);
-    } else {
-      finalPCM = userPCM16;
+    if (audioProcessorRef.current) {
+      try {
+        audioProcessorRef.current.processor.disconnect();
+        audioProcessorRef.current.source.disconnect();
+        audioProcessorRef.current.context.close();
+      } catch (error) {}
     }
 
-    const base64Data = convertPCMToBase64(finalPCM);
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const message = {
-        type: "audio_input",
-        audio_data: base64Data,
-        emotion: emotionDetectionEnabled ? emotion.aggregated : "",
-        format: "pcm", // This should be "pcm" for Gemini Live API
-        sample_rate: 16000, // Correct: 16kHz as specified
-        channels: 1, // Correct: mono
-        bits_per_sample: 16, // Correct: 16-bit
-      };
-      wsRef.current.send(JSON.stringify(message));
-      addLog(
-        `Audio sent (${(finalPCM.length / 16000).toFixed(
-          2
-        )}s) with emotion: ${
-          emotionDetectionEnabled ? emotion.aggregated : "none"
-        }`,
-        "user-input"
-      );
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     }
-  }
 
-  audioChunksRef.current = [];
-  audioProcessorRef.current = null;
-};
-  
+    setIsRecording(false);
+
+    if (audioChunksRef.current.length > 0) {
+      let totalSamples = 0;
+      audioChunksRef.current.forEach((chunk) => {
+        totalSamples += chunk.length;
+      });
+
+      const combinedPCM = new Float32Array(totalSamples);
+      let offset = 0;
+      audioChunksRef.current.forEach((chunk) => {
+        combinedPCM.set(chunk, offset);
+        offset += chunk.length;
+      });
+
+      const currentEmotion = emotionDetectionEnabled
+        ? emotion.aggregated || ""
+        : "";
+      recordingEmotionRef.current = currentEmotion;
+
+      let emotionText = "";
+      if (emotionDetectionEnabled && emotion.aggregated) {
+        emotionText = `The user's facial  emotion is: ${emotion.aggregated}`;
+      }
+
+      let ttsPCM = null;
+      try {
+        if (emotionText) {
+          ttsPCM = await synthesizeEmotionPCM(emotionText);
+        }
+      } catch (err) {
+        addLog("TTS error, sending only user audio", "error");
+      }
+
+      // Convert user audio to 16-bit PCM
+      const userPCM16 = convertTo16BitPCM(combinedPCM);
+
+      let finalPCM;
+      if (ttsPCM && ttsPCM.length > 0) {
+        // Combine TTS and user audio (both now in 16-bit format)
+        finalPCM = new Int16Array(ttsPCM.length + userPCM16.length);
+        finalPCM.set(ttsPCM, 0);
+        finalPCM.set(userPCM16, ttsPCM.length);
+      } else {
+        finalPCM = userPCM16;
+      }
+
+      const base64Data = convertPCMToBase64(finalPCM);
+
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const message = {
+          type: "audio_input",
+          audio_data: base64Data,
+          emotion: emotionDetectionEnabled ? emotion.aggregated : "",
+          format: "pcm", // This should be "pcm" for Gemini Live API
+          sample_rate: 16000, // Correct: 16kHz as specified
+          channels: 1, // Correct: mono
+          bits_per_sample: 16, // Correct: 16-bit
+        };
+        wsRef.current.send(JSON.stringify(message));
+        addLog(
+          `Audio sent (${(finalPCM.length / 16000).toFixed(
+            2
+          )}s) with emotion: ${
+            emotionDetectionEnabled ? emotion.aggregated : "none"
+          }`,
+          "user-input"
+        );
+      }
+    }
+
+    audioChunksRef.current = [];
+    audioProcessorRef.current = null;
+  };
+
   const analyzeDistressScore = async (inputText) => {
     if (!inputText || inputText.trim() === "") return;
 
@@ -874,14 +900,12 @@ const stopRecording = async () => {
 
       const data = await response.json();
       setDistress(data.score);
-      recordingDistressRef.current=data.score
-      
+      recordingDistressRef.current = data.score;
     } catch (err) {
       addLog("Distress score analysis failed", "error");
     }
   };
 
-  
   const handleUserInteraction = async () => {
     if (
       audioContextRef.current &&
@@ -929,9 +953,106 @@ const stopRecording = async () => {
     };
   }, []);
 
-  
+  useEffect(() => {
+    let audioCtx, source, processor, stream;
+    let isSpeech = false;
+    let silenceFrames = 0;
+    let speechChunks = [];
+    const SILENCE_THRESHOLD = 0.01; // Adjust for sensitivity
+    const SILENCE_FRAMES_TO_STOP = 10; // ~0.2s at 50ms per frame
 
- 
+    const startVAD = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            sampleRate: 16000,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: 16000,
+        });
+        source = audioCtx.createMediaStreamSource(stream);
+        processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = (event) => {
+          const input = event.inputBuffer.getChannelData(0);
+          const energy = Math.sqrt(
+            input.reduce((a, b) => a + b * b, 0) / input.length
+          );
+
+          if (energy > SILENCE_THRESHOLD) {
+            // Speech detected
+            if (!isSpeech) {
+              isSpeech = true;
+              speechChunks = [];
+            }
+            speechChunks.push(new Float32Array(input));
+            silenceFrames = 0;
+          } else if (isSpeech) {
+            // Silence after speech
+            silenceFrames++;
+            speechChunks.push(new Float32Array(input));
+            if (silenceFrames > SILENCE_FRAMES_TO_STOP) {
+              // Speech ended, send audio
+              isSpeech = false;
+              silenceFrames = 0;
+              sendSpeech(speechChunks);
+              speechChunks = [];
+            }
+          }
+        };
+
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
+      } catch (err) {
+        addLog("VAD error: " + err.message, "error");
+      }
+    };
+
+    const sendSpeech = async (chunks) => {
+      if (!chunks.length) return;
+      let totalSamples = chunks.reduce((sum, arr) => sum + arr.length, 0);
+      const combinedPCM = new Float32Array(totalSamples);
+      let offset = 0;
+      chunks.forEach((chunk) => {
+        combinedPCM.set(chunk, offset);
+        offset += chunk.length;
+      });
+      const userPCM16 = convertTo16BitPCM(combinedPCM);
+      const base64Data = convertPCMToBase64(userPCM16);
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const message = {
+          type: "audio_input",
+          audio_data: base64Data,
+          format: "pcm",
+          sample_rate: 16000,
+          channels: 1,
+          bits_per_sample: 16,
+        };
+        wsRef.current.send(JSON.stringify(message));
+        addLog(
+          `Auto audio sent (${(combinedPCM.length / 16000).toFixed(2)}s)`,
+          "user-input"
+        );
+      }
+    };
+
+    if (connectionStatus === "connected") {
+      startVAD();
+    }
+
+    return () => {
+      if (processor) processor.disconnect();
+      if (source) source.disconnect();
+      if (audioCtx) audioCtx.close();
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+  }, [connectionStatus]);
+
   return (
     <Modal
       title="Gemini Audio Chat"
@@ -945,25 +1066,34 @@ const stopRecording = async () => {
         >
           Close
         </Button>,
-        <Button key="start" type="primary" onClick={connectToBackend} disabled={isCalling || connectionStatus === 'connected'}>
-          {isCalling ? 'Connecting...' : connectionStatus === 'connected' ? 'Connected' : 'Start Audio Call'}
-        </Button>,
         <Button
-          key="record"
+          key="start"
           type="primary"
-          onClick={startRecording}
-          disabled={isRecording || connectionStatus !== "connected"}
+          onClick={connectToBackend}
+          disabled={isCalling || connectionStatus === "connected"}
         >
-          Start Recording
+          {isCalling
+            ? "Connecting..."
+            : connectionStatus === "connected"
+            ? "Connected"
+            : "Start Audio Call"}
         </Button>,
-        <Button
-          key="stop"
-          danger
-          onClick={stopRecording}
-          disabled={!isRecording}
-        >
-          Stop Recording
-        </Button>,
+        // <Button
+        //   key="record"
+        //   type="primary"
+        //   onClick={startRecording}
+        //   disabled={isRecording || connectionStatus !== "connected"}
+        // >
+        //   Start Recording
+        // </Button>,
+        // <Button
+        //   key="stop"
+        //   danger
+        //   onClick={stopRecording}
+        //   disabled={!isRecording}
+        // >
+        //   Stop Recording
+        // </Button>,
         <Button
           key="emotion"
           onClick={() => setEmotionDetectionEnabled((v) => !v)}
@@ -978,24 +1108,63 @@ const stopRecording = async () => {
     >
       <div style={{ textAlign: "center", padding: 20 }}>
         <p>Start a real-time audio conversation with the assistant.</p>
-        {log && <Alert message={log} type={connectionStatus === 'error' ? 'error' : 'info'} showIcon style={{ marginTop: 10 }} />}
+        {log && (
+          <Alert
+            message={log}
+            type={connectionStatus === "error" ? "error" : "info"}
+            showIcon
+            style={{ marginTop: 10 }}
+          />
+        )}
         {/* Display finalized transcripts in a styled box */}
         {(inputTranscript || outputTranscript) && (
-          <div style={{ margin: '16px 0', textAlign: 'left', background: '#f6f6f6', borderRadius: 8, padding: 12 }}>
+          <div
+            style={{
+              margin: "16px 0",
+              textAlign: "left",
+              background: "#f6f6f6",
+              borderRadius: 8,
+              padding: 12,
+            }}
+          >
             {inputTranscript && (
-              <div style={{ marginBottom: 6 }}><b>You:</b> <span style={{ color: '#333' }}>{inputTranscript}</span></div>
+              <div style={{ marginBottom: 6 }}>
+                <b>You:</b>{" "}
+                <span style={{ color: "#333" }}>{inputTranscript}</span>
+              </div>
             )}
             {outputTranscript && (
-              <div><b>Gemini:</b> <span style={{ color: '#1a73e8' }}>{outputTranscript}</span></div>
+              <div>
+                <b>Gemini:</b>{" "}
+                <span style={{ color: "#1a73e8" }}>{outputTranscript}</span>
+              </div>
             )}
           </div>
         )}
         {emotionDetectionEnabled && (
-          <div style={{ marginTop: 20, textAlign: 'left' }}>
-            <b>Detected Emotion:</b> <span>{emotion.aggregated || <i>Detecting...</i>}</span><br/>
-            {emotion.playback && <span style={{ color: '#888' }}><b>Playback Emotion:</b> {emotion.playback}</span>}
-            <video ref={videoRef} style={{ display: 'none' }} autoPlay playsInline width={128} height={96} />
-            <canvas ref={canvasRef} style={{ display: 'none' }} width={128} height={96} />
+          <div style={{ marginTop: 20, textAlign: "left" }}>
+            <b>Detected Emotion:</b>{" "}
+            <span>{emotion.aggregated || <i>Detecting...</i>}</span>
+            <br />
+            {emotion.playback && (
+              <span style={{ color: "#888" }}>
+                <b>Playback Emotion:</b> {emotion.playback}
+              </span>
+            )}
+            <video
+              ref={videoRef}
+              style={{ display: "none" }}
+              autoPlay
+              playsInline
+              width={128}
+              height={96}
+            />
+            <canvas
+              ref={canvasRef}
+              style={{ display: "none" }}
+              width={128}
+              height={96}
+            />
           </div>
         )}
       </div>
