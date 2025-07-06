@@ -263,7 +263,7 @@ async def audio_websocket_endpoint(websocket: WebSocket):
                     user_profile = system_context.get("user_profile")
                     conversation_history = system_context.get("conversation_history")
                 # Compose system instruction
-                system_instruction = ""
+                system_instruction = "You are a Therapist"
                 if user_profile:
                     system_instruction += f"User profile: {json.dumps(user_profile)}. "
                 if conversation_history and isinstance(conversation_history, list) and len(conversation_history) > 0:
@@ -272,12 +272,11 @@ async def audio_websocket_endpoint(websocket: WebSocket):
                         f"[{msg.get('sender','')}: {msg.get('text','')} ]" for msg in last_msgs
                     )
                     system_instruction += history_str
-                if system_instruction:
-                    config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
+               
                 # Start Gemini session
                 gemini_client = audio_manager.active_connections.get(websocket)
                 if gemini_client:
-                    await gemini_client.send_setup(config)
+                    await gemini_client.send_setup(config,system_instruction)
                 await websocket.send_json({"type": "setup_complete"})
             elif message.get("type") == "audio_input":
                 audio_data = message.get("audio_data", "")

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff } from 'lucide-react';
 import { Modal, Button, Alert } from 'antd';
 
-const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHistory }) => {
+const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHistory,sessionId}) => {
   const [isCalling, setIsCalling] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -231,15 +231,48 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
     }
   };
 
-  
+  // Store last detected emotion for playback
+  const lastEmotionRef = useRef('');
 
-  // Enhanced audio queueing with intelligent buffering
-  const queueAudio = (audioData, mimeType) => {
+  // Synthesize a short TTS tag for emotion (optional, can be toggled)
+  const synthesizeEmotionTag = async (emotionText) => {
+    if (!emotionText) return null;
+    try {
+      const ttsPCM = await synthesizeEmotionPCM(`You sound ${emotionText}`);
+      if (ttsPCM && ttsPCM.length > 0 && !isNaN(ttsPCM[0])) {
+        return convertPCMToBase64(ttsPCM);
+      }
+    } catch (err) {
+      addLog('Emotion TTS error: ' + err.message, 'error');
+    }
+    return null;
+  };
+
+  // Enhanced audio queueing with emotion support
+  const queueAudio = async (audioData, mimeType, emotionTag) => {
     if (!audioData || isMuted) return;
+    // If emotionTag is present and different from last, synthesize and queue TTS
+    if (emotionTag && emotionTag !== lastEmotionRef.current) {
+      lastEmotionRef.current = emotionTag;
+      setEmotion((prev) => ({ ...prev, playback: emotionTag }));
+      addLog(`Emotion detected in audio: ${emotionTag}`, 'ai-response');
+      // Optionally synthesize and queue TTS tag
+      const ttsBase64 = await synthesizeEmotionTag(emotionTag);
+      if (ttsBase64) {
+        audioBufferRef.current.push({
+          data: ttsBase64,
+          mimeType: 'audio/pcm',
+          timestamp: Date.now(),
+          isEmotionTag: true,
+          emotion: emotionTag
+        });
+      }
+    }
     audioBufferRef.current.push({
       data: audioData,
       mimeType: mimeType || 'audio/pcm',
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      emotion: emotionTag || lastEmotionRef.current
     });
     setAudioQueueLength(audioBufferRef.current.length);
     processAudioQueue();
@@ -286,34 +319,42 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
 
   // Enhanced connection with better error handling
   const connectToBackend = async () => {
+    setIsCalling(true);
+    setLog('');
+    setConnectionStatus('connecting');
+    if (!userProfile || Object.keys(userProfile).length === 0) {
+      setLog('User profile is missing or empty. Cannot start audio call.');
+      setConnectionStatus('error');
+      setIsCalling(false);
+      console.warn('GeminiAudioChatModal: userProfile is missing or empty', userProfile);
+      return;
+    }
+    if (!conversationHistory) {
+      setLog('Conversation history is missing or empty. Cannot start audio call.');
+      setConnectionStatus('error');
+      setIsCalling(false);
+      console.warn('GeminiAudioChatModal: conversationHistory is missing or empty', conversationHistory);
+      return;
+    }
     try {
-      setConnectionStatus('connecting');
-      addLog('Connecting to backend...', 'info');
-
-      await initializeAudioContext();
-      
-      const wsUrl = 'ws://localhost:8000/audio';
-      wsRef.current = new WebSocket(wsUrl);
-
+      wsRef.current = new window.WebSocket('ws://localhost:8000/audio');
       wsRef.current.onopen = () => {
-        setIsConnected(true);
         setConnectionStatus('connected');
-        addLog('Connected successfully', 'success');
-
-        const config = {
-          type: 'setup',
-          config: {
-            model: 'models/gemini-2.5-flash-preview-native-audio-dialog',
-            response_modalities: ['AUDIO'],
-            voice_name: 'Puck',
-            audio_config: {
-              sample_rate: AUDIO_CONFIG.sampleRate,
-              chunk_size: AUDIO_CONFIG.bufferSize,
-              enable_streaming: true
-            }
-          },
-        };
-        wsRef.current.send(JSON.stringify(config));
+        setLog('Connected to audio backend. Sending setup...');
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'setup',
+            config: {
+              model: 'models/gemini-2.5-flash-preview-native-audio-dialog',
+              response_modalities: ['AUDIO'],
+              voice_name: 'Puck',
+              systemContext: {
+                user_profile: userProfile,
+                conversation_history: conversationHistory,
+              },
+            },
+          })
+        );
       };
 
       wsRef.current.onmessage = (event) => {
@@ -321,49 +362,52 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
           const data = JSON.parse(event.data);
           
           switch (data.type) {
+
+            case 'setup_complete':
+               setLog('Audio session setup complete. You can now talk!');
             case 'audio':
               if (data.audio_data && !isMuted) {
-                queueAudio(data.audio_data, data.mime_type || 'audio/pcm');
+                // Pass emotion if present
+                queueAudio(data.audio_data, data.mime_type || 'audio/pcm', data.emotion);
               }
               break;
               
-            case 'transcript':
-              addLog(`Gemini: ${data.text}`, 'ai-response');
-              break;
-              
-            case 'user_transcript':
-              addLog(`You: ${data.text}`, 'user-input');
-              break;
               
             case 'input_transcription':
               currentInputTranscriptRef.current += (data.text || '');
-              if (data.final || data.is_final) {
-                setInputTranscript(currentInputTranscriptRef.current);
-                analyzeDistressScore(currentInputTranscriptRef.current);
-                currentInputTranscriptRef.current = '';
-              }
               break;
               
             case 'output_transcription':
               currentOutputTranscriptRef.current += (data.text || '');
-              if (data.final || data.is_final) {
-                setOutputTranscript(currentOutputTranscriptRef.current);
-                currentOutputTranscriptRef.current = '';
-              }
               break;
-              
-            case 'info':
-              addLog(data.message, 'info');
-              break;
+
               
             case 'turnComplete':
+              console.log('Turn   Completed')
               if (currentInputTranscriptRef.current) {
                 setInputTranscript(currentInputTranscriptRef.current);
+                console.log("input:",inputTranscript)
                 analyzeDistressScore(currentInputTranscriptRef.current);
+              //    saveMessage(activeSession, {
+              //   sender: 'user',
+              //   type: 'user',
+              //   text:inputTranscript,
+              //   emotion: emotion.aggregated,
+              //   distress: distress,
+              //   timestamp: new Date().toISOString(),
+              // });
                 currentInputTranscriptRef.current = '';
+              
               }
               if (currentOutputTranscriptRef.current) {
+
                 setOutputTranscript(currentOutputTranscriptRef.current);
+                console.log("output:",outputTranscript)
+            //      saveMessage(activeSession, {
+            //   type: 'model',
+            //   text: outputTranscript,
+            //   timestamp: new Date().toISOString(),
+            // });
                 currentOutputTranscriptRef.current = '';
               }
               addLog('Turn completed', 'success');
@@ -398,7 +442,25 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       setConnectionStatus('error');
     }
   };
-
+   const saveMessage = async (sessionId, message) => {
+    try {
+      console.log('[saveMessage] Sending to backend:', message);
+      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify(message)
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[saveMessage] Backend responded with status ${res.status}:`, errorText);
+      }
+    } catch (err) {
+      console.error("Failed to save message", err);
+    }
+  };
   const disconnect = () => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -469,88 +531,78 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
   };
 
   // Rest of the emotion detection logic remains the same...
-  useEffect(() => {
-    let interval = null;
-    let ws = null;
-    
-    if (!emotionDetectionEnabled) {
-      if (webcamStreamRef.current) {
-        webcamStreamRef.current.getTracks().forEach(track => track.stop());
-        webcamStreamRef.current = null;
-      }
-      setEmotion((prev) => ({ ...prev, aggregated: '' }));
-      if (emotionWs) {
-        emotionWs.close();
-        setEmotionWs(null);
-      }
-      return;
-    }
+ useEffect(() => {
+    if (!emotionDetectionEnabled) return;
+    let ws;
+    let interval;
+    let stream;
+    let isMounted = true;
 
+    // Open a dedicated WebSocket for emotion detection
+    ws = new WebSocket("ws://localhost:8000");
+
+    ws.onopen = () => {
+      console.log("[Emotion] WebSocket connected");
+      ws.send(JSON.stringify({ setup: {} }));
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.emotion) {
+        setEmotion(data.emotion);
+        // console.log("[Emotion] Current:", data.emotion.current, "Aggregated:", data.emotion.aggregated);
+      } else if (data.setupComplete) {
+        console.log("[Emotion] Setup complete");
+      } else {
+        console.warn("[Emotion] Unknown message:", data);
+      }
+    };
+
+    ws.onerror = (err) => console.error("[Emotion] WebSocket error:", err);
+    ws.onclose = () => console.warn("[Emotion] WebSocket closed");
+
+    // Start webcam
     navigator.mediaDevices
       .getUserMedia({ video: true })
-      .then((stream) => {
-        setCameraPermission(true);
-        webcamStreamRef.current = stream;
+      .then((mediaStream) => {
+        stream = mediaStream;
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+          videoRef.current.srcObject = mediaStream;
         }
-        
-        ws = new WebSocket('ws://localhost:8000/');
-        setEmotionWs(ws);
-        
-        ws.onopen = () => {
-          ws.send(JSON.stringify({ setup: { mode: 'emotion' } }));
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.emotion) {
-              setEmotion(data.emotion);
-            }
-          } catch (e) {}
-        };
-        
-        ws.onerror = (e) => {
-          setCameraPermission(false);
-        };
-        
-        ws.onclose = () => {
-          setEmotionWs(null);
-        };
-        
         interval = setInterval(() => {
+          if (!ws || ws.readyState !== WebSocket.OPEN){
+            console.log("WebSocket not open");
+            return;
+          }
           const canvas = canvasRef.current;
           const video = videoRef.current;
-          if (canvas && video && ws && ws.readyState === WebSocket.OPEN) {
-            const ctx = canvas.getContext('2d');
+           if (!canvas) {
+            console.log("Canvas not available");
+            return;
+          }
+          if (!video) {
+    console.log("Video not available");
+    return;
+  }
+          if (canvas && video) {
+            const ctx = canvas.getContext("2d");
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob((blob) => {
-              const reader = new FileReader();
-              reader.onloadend = () => {
-                const base64data = reader.result.split(',')[1];
-                ws.send(JSON.stringify({ frame: base64data }));
-              };
-              reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.8);
+            const dataURL = canvas.toDataURL("image/jpeg");
+            const base64 = dataURL.split(",")[1];
+            // console.log("Frame sent")
+            ws.send(JSON.stringify({ frame: base64 }));
           }
         }, 1000);
       })
-      .catch((err) => {
-        setCameraPermission(false);
-        setEmotion((prev) => ({ ...prev, aggregated: '' }));
-        if (ws) ws.close();
-        console.error('Error accessing webcam:', err);
-      });
+      .catch((err) => console.error("[Emotion] Error accessing webcam:", err));
 
     return () => {
+      isMounted = false;
       if (interval) clearInterval(interval);
-      if (webcamStreamRef.current) {
-        webcamStreamRef.current.getTracks().forEach(track => track.stop());
-        webcamStreamRef.current = null;
-      }
       if (ws) ws.close();
-      setEmotionWs(null);
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
     };
   }, [emotionDetectionEnabled]);
 
@@ -703,29 +755,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
     }
   };
 
-  const toggleMute = () => {
-    const newMutedState = !isMuted;
-    setIsMuted(newMutedState);
-    addLog(`Audio ${newMutedState ? 'muted' : 'unmuted'}`, 'info');
-
-    if (masterGainRef.current) {
-      const currentTime = audioContextRef.current.currentTime;
-      masterGainRef.current.gain.cancelScheduledValues(currentTime);
-      masterGainRef.current.gain.setValueAtTime(
-        masterGainRef.current.gain.value,
-        currentTime
-      );
-      masterGainRef.current.gain.linearRampToValueAtTime(
-        newMutedState ? 0 : 1,
-        currentTime + 0.05
-      );
-    }
-
-    if (newMutedState) {
-      clearAudioQueue();
-    }
-  };
-
+  
   const handleUserInteraction = async () => {
     if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
       await audioContextRef.current.resume();
@@ -770,117 +800,9 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
     };
   }, []);
 
-  const getStatusColor = () => {
-    switch (connectionStatus) {
-      case 'connected':
-        return 'text-green-600';
-      case 'connecting':
-        return 'text-yellow-600';
-      case 'error':
-        return 'text-red-600';
-      default:
-        return 'text-gray-600';
-    }
-  };
-
   
 
-  const getLogTypeColor = (type) => {
-    switch (type) {
-      case "success":
-        return "text-green-600";
-      case "error":
-        return "text-red-600";
-      case "warning":
-        return "text-yellow-600";
-      case "ai-response":
-        return "text-blue-600 font-medium";
-      case "user-input":
-        return "text-purple-600 font-medium";
-      default:
-        return "text-gray-600";
-    }
-  };
-
-  const handleStartCall = async () => {
-    setIsCalling(true);
-    setLog('');
-    setConnectionStatus('connecting');
-    if (!userProfile || Object.keys(userProfile).length === 0) {
-      setLog('User profile is missing or empty. Cannot start audio call.');
-      setConnectionStatus('error');
-      setIsCalling(false);
-      console.warn('GeminiAudioChatModal: userProfile is missing or empty', userProfile);
-      return;
-    }
-    if (!conversationHistory) {
-      setLog('Conversation history is missing or empty. Cannot start audio call.');
-      setConnectionStatus('error');
-      setIsCalling(false);
-      console.warn('GeminiAudioChatModal: conversationHistory is missing or empty', conversationHistory);
-      return;
-    }
-    try {
-      wsRef.current = new window.WebSocket('ws://localhost:8000/audio');
-      wsRef.current.onopen = () => {
-        setConnectionStatus('connected');
-        setLog('Connected to audio backend. Sending setup...');
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'setup',
-            config: {
-              model: 'models/gemini-2.5-flash-preview-native-audio-dialog',
-              response_modalities: ['AUDIO'],
-              voice_name: 'Puck',
-              systemContext: {
-                user_profile: userProfile,
-                conversation_history: conversationHistory,
-              },
-            },
-          })
-        );
-      };
-      wsRef.current.onerror = (e) => {
-        setConnectionStatus('error');
-        setLog('WebSocket error: ' + e.message);
-        setIsCalling(false);
-      };
-      wsRef.current.onclose = () => {
-        setConnectionStatus('disconnected');
-        setLog('Disconnected from audio backend.');
-        setIsCalling(false);
-      };
-      wsRef.current.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'setup_complete') {
-            setLog('Audio session setup complete. You can now talk!');
-          } else if (data.type === 'error') {
-            setLog('Backend error: ' + data.message);
-            setConnectionStatus('error');
-            setIsCalling(false);
-          } else if (data.type === 'info') {
-            setLog((prev) => prev + '\n' + data.message);
-          } else if (data.type === 'audio') {
-            setLog((prev) => prev + '\n[Audio data received]');
-            // Use queueAudio for new audio system
-            if (data.audio_data && !isMuted) {
-              queueAudio(data.audio_data, data.mime_type || 'audio/pcm');
-            }
-          } else {
-            setLog((prev) => prev + '\n[Backend] ' + JSON.stringify(data));
-          }
-        } catch (err) {
-          setLog('Message parse error: ' + err.message);
-        }
-      };
-    } catch (err) {
-      setConnectionStatus('error');
-      setLog('Connection error: ' + err.message);
-      setIsCalling(false);
-    }
-  };
-
+ 
   return (
     <Modal
       title="Gemini Audio Chat"
@@ -890,7 +812,7 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
         <Button key="close" onClick={onClose} disabled={isCalling || isRecording}>
           Close
         </Button>,
-        <Button key="start" type="primary" onClick={handleStartCall} disabled={isCalling || connectionStatus === 'connected'}>
+        <Button key="start" type="primary" onClick={connectToBackend} disabled={isCalling || connectionStatus === 'connected'}>
           {isCalling ? 'Connecting...' : connectionStatus === 'connected' ? 'Connected' : 'Start Audio Call'}
         </Button>,
         <Button key="record" type="primary" onClick={startRecording} disabled={isRecording || connectionStatus !== 'connected'}>
@@ -908,9 +830,23 @@ const GeminiAudioChatModal = ({ visible, onClose, userProfile, conversationHisto
       <div style={{ textAlign: 'center', padding: 20 }}>
         <p>Start a real-time audio conversation with the assistant.</p>
         {log && <Alert message={log} type={connectionStatus === 'error' ? 'error' : 'info'} showIcon style={{ marginTop: 10 }} />}
+        {/* Display finalized transcripts in a styled box */}
+        {(inputTranscript || outputTranscript) && (
+          <div style={{ margin: '16px 0', textAlign: 'left', background: '#f6f6f6', borderRadius: 8, padding: 12 }}>
+            {inputTranscript && (
+              <div style={{ marginBottom: 6 }}><b>You:</b> <span style={{ color: '#333' }}>{inputTranscript}</span></div>
+            )}
+            {outputTranscript && (
+              <div><b>Gemini:</b> <span style={{ color: '#1a73e8' }}>{outputTranscript}</span></div>
+            )}
+          </div>
+        )}
         {emotionDetectionEnabled && (
           <div style={{ marginTop: 20, textAlign: 'left' }}>
-            <b>Detected Emotion:</b> <span>{emotion.aggregated || <i>Detecting...</i>}</span>
+            <b>Detected Emotion:</b> <span>{emotion.aggregated || <i>Detecting...</i>}</span><br/>
+            {emotion.playback && <span style={{ color: '#888' }}><b>Playback Emotion:</b> {emotion.playback}</span>}
+            <video ref={videoRef} style={{ display: 'none' }} autoPlay playsInline width={128} height={96} />
+            <canvas ref={canvasRef} style={{ display: 'none' }} width={128} height={96} />
           </div>
         )}
       </div>

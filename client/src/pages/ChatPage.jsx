@@ -1194,6 +1194,7 @@ const fetchSessions = async () => {
         onClose={() => setIsAudioModalVisible(false)}
         userProfile={userProfile}
         conversationHistory={audioConversationHistory}
+        sessionId={activeSession}
       />
   
   </>
