@@ -74,7 +74,7 @@ const ChatPage = () => {
   const [messageInput, setMessageInput] = useState("");
   const [currentResponse, setCurrentResponse] = useState("");
   const currentResponseRef = useRef("");
-   
+
   // Config
   const [systemInstruction, setSystemInstruction] = useState(
     "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
@@ -144,20 +144,20 @@ const ChatPage = () => {
           videoRef.current.srcObject = mediaStream;
         }
         interval = setInterval(() => {
-          if (!ws || ws.readyState !== WebSocket.OPEN){
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
             console.log("WebSocket not open");
             return;
           }
           const canvas = canvasRef.current;
           const video = videoRef.current;
-           if (!canvas) {
+          if (!canvas) {
             console.log("Canvas not available");
             return;
           }
           if (!video) {
-    console.log("Video not available");
-    return;
-  }
+            console.log("Video not available");
+            return;
+          }
           if (canvas && video) {
             const ctx = canvas.getContext("2d");
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -208,20 +208,21 @@ const ChatPage = () => {
     if (shouldReconnect && resumeHandle) {
       setShouldReconnect(false);
       setTimeout(() => {
-        console.log("[Client] Triggering session reconnect with resume handle:", resumeHandle);
+        console.log(
+          "[Client] Triggering session reconnect with resume handle:",
+          resumeHandle
+        );
         connect(true);
       }, 500);
     }
   }, [shouldReconnect, resumeHandle]);
-const fetchSessions = async () => {
+
+  const fetchSessions = useCallback(async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.get(
-        `${BACKEND_URL}/api/chat/sessions`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const response = await axios.get(`${BACKEND_URL}/api/chat/sessions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setChatSessions(response.data);
       const savedSession = localStorage.getItem("activeSession");
       const validSession = response.data.find(
@@ -247,14 +248,11 @@ const fetchSessions = async () => {
       antdMessage.error("Failed to fetch chat sessions.");
       console.error("Failed to fetch sessions:", error);
     }
-  };
+  }, [BACKEND_URL]);
 
-  // Remove mock chat sessions and frontend-generated session IDs
-  // Initialize chat sessions on mount
   useEffect(() => {
-    fetchSessions(); // Only fetch from backend
+    fetchSessions();
   }, [fetchSessions]);
-
   // When switching sessions, fetch messages from backend
   useEffect(() => {
     if (activeSession) {
@@ -270,64 +268,64 @@ const fetchSessions = async () => {
       setShouldReconnect(true);
       addSystemMessage("Session expiring, reconnecting to resume...");
     }
-    
+
     if (data.emotion) {
       setEmotion(data.emotion);
       return;
     }
-    
+
     if (data.error) {
       showError(data.error);
       return;
     }
-    
-    if (data.serverContent) {
-      const modelTurn = data.serverContent.modelTurn;
-      if (modelTurn && modelTurn.parts && modelTurn.parts.length > 0) {
-        const text = modelTurn.parts[0].text;
-        setCurrentResponse((prev) => {
-          const updated = prev + text;
-          currentResponseRef.current = updated;
-          return updated;
-        });
-        setIsTyping(true);
-      }
-      if (data.serverContent.generationComplete) {
-        if (currentResponseRef.current) {
-          // Save user message before model message
-          if (activeSession && messages.length > 0) {
-            const lastUserMsg = messages[messages.length - 1];
-            if (lastUserMsg.type === 'user') {
-              saveMessage(activeSession, {
-                sender: 'user',
-                type: 'user',
-                text: lastUserMsg.content,
-                emotion: emotion.current,
-                distress: distressScore,
-                timestamp: lastUserMsg.timestamp,
-              });
-            }
-          }
-          addMessage("model", currentResponseRef.current);
-          // Save model message to backend after each model response
-          if (activeSession) {
-            saveMessage(activeSession, {
-              type: 'model',
-              text: currentResponseRef.current,
-              timestamp: new Date().toISOString(),
-            });
-          }
-        }
-        setCurrentResponse("");
-        currentResponseRef.current = "";
-        setIsTyping(false);
-      }
-      if (data.serverContent.turnComplete) {
-        console.log("[Client] Turn complete");
-      }
-      return;
-    }
-    
+
+    // if (data.serverContent) {
+    //   const modelTurn = data.serverContent.modelTurn;
+    //   if (modelTurn && modelTurn.parts && modelTurn.parts.length > 0) {
+    //     const text = modelTurn.parts[0].text;
+    //     setCurrentResponse((prev) => {
+    //       const updated = prev + text;
+    //       currentResponseRef.current = updated;
+    //       return updated;
+    //     });
+    //     setIsTyping(true);
+    //   }
+    //   if (data.serverContent.generationComplete) {
+    //     if (currentResponseRef.current) {
+    //       // Save user message before model message
+    //       if (activeSession && messages.length > 0) {
+    //         const lastUserMsg = messages[messages.length - 1];
+    //         if (lastUserMsg.type === "user") {
+    //           saveMessage(activeSession, {
+    //             sender: "user",
+    //             type: "user",
+    //             text: lastUserMsg.content,
+    //             emotion: emotion.current,
+    //             distress: distressScore,
+    //             timestamp: lastUserMsg.timestamp,
+    //           });
+    //         }
+    //       }
+    //       addMessage("model", currentResponseRef.current);
+    //       // Save model message to backend after each model response
+    //       if (activeSession) {
+    //         saveMessage(activeSession, {
+    //           type: "model",
+    //           text: currentResponseRef.current,
+    //           timestamp: new Date().toISOString(),
+    //         });
+    //       }
+    //     }
+    //     setCurrentResponse("");
+    //     currentResponseRef.current = "";
+    //     setIsTyping(false);
+    //   }
+    //   if (data.serverContent.turnComplete) {
+    //     console.log("[Client] Turn complete");
+    //   }
+    //   return;
+    // }
+
     switch (data.type) {
       case "connection_established":
         showSuccess(data.message || "Connected to Live API Bridge");
@@ -338,7 +336,7 @@ const fetchSessions = async () => {
         addSystemMessage("Session started - You can now send messages");
         break;
       case "setup_complete":
-        console.log('setup complete!!!');
+        console.log("setup complete!!!");
         setHasActiveSession(true);
         // addSystemMessage("Session setup complete - You can now send messages"); // Removed per user request
         break;
@@ -351,21 +349,53 @@ const fetchSessions = async () => {
           setIsTyping(true);
           setCurrentResponse((prev) => {
             const updated = prev + data.content;
+            console.log("Appending chunk:", data.content, "Updated:", updated);
             currentResponseRef.current = updated;
             return updated;
           });
+        } else {
+          // Final chunk received
+          setIsTyping(false);
+          if (currentResponseRef.current) {
+            // Save user message before model message
+            if (activeSession && messages.length > 0) {
+              const lastUserMsg = messages[messages.length - 1];
+              if (lastUserMsg.type === "user") {
+                saveMessage(activeSession, {
+                  sender: "user",
+                  type: "user",
+                  text: lastUserMsg.content,
+                  emotion: emotion.current,
+                  distress: distressScore,
+                  timestamp: lastUserMsg.timestamp,
+                });
+              }
+            }
+            addMessage("model", currentResponseRef.current);
+            // Save model message to backend after each model response
+            if (activeSession) {
+              saveMessage(activeSession, {
+                type: "model",
+                text: currentResponseRef.current,
+                timestamp: new Date().toISOString(),
+              });
+            }
+          }
+          setCurrentResponse("");
+          currentResponseRef.current = "";
         }
         break;
+
       case "generation_complete":
         setIsTyping(false);
         if (currentResponseRef.current) {
           // Save user message before model message
           if (activeSession && messages.length > 0) {
             const lastUserMsg = messages[messages.length - 1];
-            if (lastUserMsg.type === 'user') {
+            if (lastUserMsg.type === "user") {
               saveMessage(activeSession, {
-                sender: 'user',
-                type: 'user',
+                sender: "user",
+                type: "user",
                 text: lastUserMsg.content,
                 emotion: emotion.current,
                 distress: distressScore,
@@ -377,7 +407,7 @@ const fetchSessions = async () => {
           // Save model message to backend after each model response
           if (activeSession) {
             saveMessage(activeSession, {
-              type: 'model',
+              type: "model",
               text: currentResponseRef.current,
               timestamp: new Date().toISOString(),
             });
@@ -386,6 +416,7 @@ const fetchSessions = async () => {
         setCurrentResponse("");
         currentResponseRef.current = "";
         break;
+
       case "message_sent":
         console.log("[Client] Message acknowledged by server");
         break;
@@ -428,9 +459,9 @@ const fetchSessions = async () => {
 
   // Simple text formatting function
   const formatText = (text) => {
-    return text?.replace(/\n/g, '<br/>') || '';
+    return text?.replace(/\n/g, "<br/>") || "";
   };
- 
+
   // Helper functions
   const addMessage = (type, content) => {
     if (type !== "user" && type !== "model" && type !== "system") return;
@@ -482,7 +513,7 @@ const fetchSessions = async () => {
     if (newUserMessage) {
       turns.push({ role: "user", parts: [{ text: newUserMessage.trim() }] });
     }
-    
+
     let lastRole = null;
     const filteredTurns = [];
     for (const turn of turns) {
@@ -517,12 +548,17 @@ const fetchSessions = async () => {
             },
             systemInstruction: systemInstruction.trim() || undefined,
             tools: toolsEnabled ? [{}] : undefined,
-            ...(resumeHandle ? { sessionResumption: { handle: resumeHandle } } : {}),
+            ...(resumeHandle
+              ? { sessionResumption: { handle: resumeHandle } }
+              : {}),
           },
         };
         wsRef.current.send(JSON.stringify(setupMsg));
         if (resumeHandle) {
-          console.log("[Client] Reconnected and sent setup with resume handle:", resumeHandle);
+          console.log(
+            "[Client] Reconnected and sent setup with resume handle:",
+            resumeHandle
+          );
         }
         setResumeHandle(null);
       };
@@ -545,7 +581,10 @@ const fetchSessions = async () => {
         currentResponseRef.current = "";
         addSystemMessage(`Disconnected from server (Code: ${event.code})`);
         if (resumeHandle) {
-          console.log("[Client] Disconnected, will attempt to reconnect with resume handle:", resumeHandle);
+          console.log(
+            "[Client] Disconnected, will attempt to reconnect with resume handle:",
+            resumeHandle
+          );
           setTimeout(() => {
             connect(true);
           }, 500);
@@ -571,25 +610,25 @@ const fetchSessions = async () => {
 
   // Distress score analysis (Gemini backend)
   const analyzeDistressScore = async (inputText) => {
-    if (!inputText || inputText.trim() === '') return;
+    if (!inputText || inputText.trim() === "") return;
     try {
-      console.log('[Distress] Sending text for distress score:', inputText); // Log input
+      console.log("[Distress] Sending text for distress score:", inputText); // Log input
       const response = await fetch(`${GEMINI_BACKEND_URL}/api/distress-score`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: inputText })
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: inputText }),
       });
-      if (!response.ok) throw new Error('API error');
+      if (!response.ok) throw new Error("API error");
       const data = await response.json();
       setDistressScore(data.score);
       // Log distress score and emotion immediately after update
       setTimeout(() => {
-        console.log('[Distress] API response:', data); // Log full API response
-        console.log('[Distress] Distress score for message:', data.score);
-        console.log('[Distress] Emotion for message:', emotion.current);
+        console.log("[Distress] API response:", data); // Log full API response
+        console.log("[Distress] Distress score for message:", data.score);
+        console.log("[Distress] Emotion for message:", emotion.current);
       }, 0);
     } catch (err) {
-      console.error('[Distress] Distress score analysis failed', err);
+      console.error("[Distress] Distress score analysis failed", err);
     }
   };
 
@@ -697,7 +736,7 @@ const fetchSessions = async () => {
   };
 
   // Fetch chat sessions from Node backend
-  
+
   // Create a new session in Node backend
   const createSession = async () => {
     try {
@@ -721,22 +760,28 @@ const fetchSessions = async () => {
   // Fetch conversation history for a session from Node backend
   const fetchMessages = async (sessionId) => {
     try {
-      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}`, {
-        headers: {
-          ...getAuthHeaders(),
-        },
-      });
+      const res = await fetch(
+        `${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}`,
+        {
+          headers: {
+            ...getAuthHeaders(),
+          },
+        }
+      );
       const data = await res.json();
       if (data.messages) {
         const formattedMessages = data.messages.map((msg, idx) => {
           // Robustly map backend message fields to UI format
-          let sender = 'system';
-          if (msg.sender === 'user' || msg.type === 'user') sender = 'user';
-          else if (msg.sender === 'bot' || msg.type === 'model') sender = 'bot';
+          let sender = "system";
+          if (msg.sender === "user" || msg.type === "user") sender = "user";
+          else if (msg.sender === "bot" || msg.type === "model") sender = "bot";
           // Prefer 'text', fallback to 'content', fallback to empty string
-          const text = typeof msg.text === 'string' && msg.text.trim() !== ''
-            ? msg.text
-            : (typeof msg.content === 'string' ? msg.content : '');
+          const text =
+            typeof msg.text === "string" && msg.text.trim() !== ""
+              ? msg.text
+              : typeof msg.content === "string"
+              ? msg.content
+              : "";
           return {
             ...msg,
             id: idx + 1,
@@ -745,7 +790,7 @@ const fetchSessions = async () => {
             content: text, // for compatibility
           };
         });
-        console.log('conversationHistory',formattedMessages)
+        console.log("conversationHistory", formattedMessages);
         setMessages(formattedMessages);
         setAudioConversationHistory(formattedMessages); // <-- set audio history
         messageIdRef.current = data.messages.length + 1;
@@ -765,18 +810,24 @@ const fetchSessions = async () => {
   // Save a message to Node backend
   const saveMessage = async (sessionId, message) => {
     try {
-      console.log('[saveMessage] Sending to backend:', message);
-      const res = await fetch(`${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify(message)
-      });
+      console.log("[saveMessage] Sending to backend:", message);
+      const res = await fetch(
+        `${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify(message),
+        }
+      );
       if (!res.ok) {
         const errorText = await res.text();
-        console.error(`[saveMessage] Backend responded with status ${res.status}:`, errorText);
+        console.error(
+          `[saveMessage] Backend responded with status ${res.status}:`,
+          errorText
+        );
       }
     } catch (err) {
       console.error("Failed to save message", err);
@@ -787,13 +838,12 @@ const fetchSessions = async () => {
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
- useEffect(()=>{
-  fetchUserProfile();
- },[])
+  useEffect(() => {
+    fetchUserProfile();
+  }, []);
   // When switching sessions, fetch messages from backend
   useEffect(() => {
     if (activeSession) {
-       
       fetchMessages(activeSession);
     }
   }, [activeSession]);
@@ -809,12 +859,12 @@ const fetchSessions = async () => {
     if (!activeSession || messages.length < 2) return;
     const last = messages[messages.length - 1];
     const secondLast = messages[messages.length - 2];
-    if (secondLast.type === 'user' && last.type === 'model') {
+    if (secondLast.type === "user" && last.type === "model") {
       // Save user message
       if (secondLast.content && secondLast.content.trim() !== "") {
         saveMessage(activeSession, {
           sender: "user",
-          type: 'user',
+          type: "user",
           text: secondLast.content,
           emotion: emotion.current,
           distress: distressScore,
@@ -825,7 +875,7 @@ const fetchSessions = async () => {
       if (last.content && last.content.trim() !== "") {
         saveMessage(activeSession, {
           sender: "bot",
-          type: 'model',
+          type: "model",
           text: last.content,
           timestamp: last.timestamp,
         });
@@ -848,56 +898,61 @@ const fetchSessions = async () => {
       const res = await fetch(`${NODE_BACKEND_URL}/api/profile`, {
         headers: { ...getAuthHeaders() },
       });
-      if (!res.ok) throw new Error('Failed to fetch user profile');
+      if (!res.ok) throw new Error("Failed to fetch user profile");
       const data = await res.json();
       setUserProfile(data);
     } catch (err) {
-      console.error('Error fetching user profile:', err);
+      console.error("Error fetching user profile:", err);
       return null;
     }
   };
 
   // Gemini session setup with context (now async, fetches user profile and session messages)
-  const setupGeminiSession = useCallback(async (sessionId) => {
-    try {
-      // Prepare conversation history for Gemini
-      const conversation_history = (messages || []).map((msg) => ({
-        sender: msg.sender,
-        type: msg.type,
-        text: msg.text || msg.content || '',
-        timestamp: msg.timestamp,
-        emotion: msg.emotion,
-        distress: msg.distress,
-      }));
-
-      const systemContext = {
-        user_profile: userProfile,
-        conversation_history,
-      };
-
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          setup: {
-            model: "gemini-2.0-flash-live-001",
-            systemContext,
-            systemInstruction: systemInstruction.trim() || undefined,
-            tools: toolsEnabled ? [{}] : undefined,
-          }
+  const setupGeminiSession = useCallback(
+    async (sessionId) => {
+      try {
+        // Prepare conversation history for Gemini
+        const conversation_history = (messages || []).map((msg) => ({
+          sender: msg.sender,
+          type: msg.type,
+          text: msg.text || msg.content || "",
+          timestamp: msg.timestamp,
+          emotion: msg.emotion,
+          distress: msg.distress,
         }));
+
+        const systemContext = {
+          user_profile: userProfile,
+          conversation_history,
+        };
+
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              setup: {
+                model: "gemini-2.0-flash-live-001",
+                systemContext,
+                systemInstruction: systemInstruction.trim() || undefined,
+                tools: toolsEnabled ? [{}] : undefined,
+              },
+            })
+          );
+        }
+      } catch (err) {
+        console.error("Failed to setup Gemini session with context:", err);
       }
-    } catch (err) {
-      console.error("Failed to setup Gemini session with context:", err);
-    }
-  }, [systemInstruction, toolsEnabled]);
+    },
+    [systemInstruction, toolsEnabled]
+  );
 
   // Connect and setup session when active session changes
   useEffect(() => {
     if (!activeSession) return;
-    
+
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       connect();
     }
-    
+
     const timeout = setTimeout(() => {
       setupGeminiSession(activeSession);
     }, 500);
@@ -916,10 +971,15 @@ const fetchSessions = async () => {
         </Button>,
       ]}
     >
-      <div style={{ textAlign: 'center', padding: '20px' }}>
-        <video ref={videoRef} autoPlay muted style={{ width: '100%', maxWidth: '300px' }} />
-        <p>Current Emotion: {emotion.current || 'None detected'}</p>
-        <Button 
+      <div style={{ textAlign: "center", padding: "20px" }}>
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          style={{ width: "100%", maxWidth: "300px" }}
+        />
+        <p>Current Emotion: {emotion.current || "None detected"}</p>
+        <Button
           onClick={() => setEmotionDetectionEnabled(!emotionDetectionEnabled)}
           type={emotionDetectionEnabled ? "danger" : "primary"}
         >
@@ -931,7 +991,14 @@ const fetchSessions = async () => {
 
   // Mock Loader component
   const Loader = () => (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100px' }}>
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        height: "100px",
+      }}
+    >
       <Spin size="large" />
     </div>
   );
@@ -954,9 +1021,21 @@ const fetchSessions = async () => {
   return (
     <>
       {/* Always render the hidden video and canvas for emotion detection */}
-      <video ref={videoRef} style={{ display: 'none' }} autoPlay muted width="640" height="480" />
-      <canvas ref={canvasRef} style={{ display: 'none' }} width="640" height="480" />
-      <Layout style={{ height: '100vh' }}>
+      <video
+        ref={videoRef}
+        style={{ display: "none" }}
+        autoPlay
+        muted
+        width="640"
+        height="480"
+      />
+      <canvas
+        ref={canvasRef}
+        style={{ display: "none" }}
+        width="640"
+        height="480"
+      />
+      <Layout style={{ height: "100vh" }}>
         <Sider
           width={250}
           collapsible
@@ -970,12 +1049,12 @@ const fetchSessions = async () => {
             overflow: "hidden",
           }}
         >
-          <div style={{ padding: '16px', textAlign: 'center' }}>
-            <h3 style={{ color: '#fff', margin: 0 }}>
-              {!collapsed ? 'Chat Sessions' : '💬'}
+          <div style={{ padding: "16px", textAlign: "center" }}>
+            <h3 style={{ color: "#fff", margin: 0 }}>
+              {!collapsed ? "Chat Sessions" : "💬"}
             </h3>
           </div>
-          
+
           <Menu
             theme="light"
             mode="inline"
@@ -985,15 +1064,22 @@ const fetchSessions = async () => {
               localStorage.setItem("activeSession", key);
               fetchMessages(key);
             }}
-            style={{ background: 'transparent', border: 'none' }}
+            style={{ background: "transparent", border: "none" }}
             items={chatSessions.map((session) => ({
               key: session._id,
               icon: <MessageOutlined />,
-              label: !collapsed ? session.sessionName : '',
+              label: !collapsed ? session.sessionName : "",
             }))}
           />
-          
-          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+
+          <div
+            style={{
+              padding: "16px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px",
+            }}
+          >
             <Button
               type="primary"
               icon={<PlusOutlined />}
@@ -1034,7 +1120,9 @@ const fetchSessions = async () => {
               icon={<CameraOutlined />}
               onClick={() => setEmotionDetectionEnabled((prev) => !prev)}
               style={{
-                backgroundColor: emotionDetectionEnabled ? "#d32f2f" : "#4CAF50",
+                backgroundColor: emotionDetectionEnabled
+                  ? "#d32f2f"
+                  : "#4CAF50",
                 borderColor: emotionDetectionEnabled ? "#b71c1c" : "#388E3C",
                 color: "white",
                 fontWeight: "bold",
@@ -1043,106 +1131,128 @@ const fetchSessions = async () => {
               }}
             >
               {!collapsed && (
-                <span>{emotionDetectionEnabled ? "Stop Emotion Capture" : "Capture Emotion"}</span>
+                <span>
+                  {emotionDetectionEnabled
+                    ? "Stop Emotion Capture"
+                    : "Capture Emotion"}
+                </span>
               )}
             </Button>
           </div>
         </Sider>
 
         <Layout>
-          <Content style={{ 
-            padding: '20px', 
-            display: 'flex', 
-            flexDirection: 'column',
-            height: '100vh',
-            background: '#fff'
-          }}>
-            <motion.div 
-              style={{ 
-                flex: 1, 
-                overflowY: 'auto', 
-                marginBottom: '20px',
-                padding: '10px',
-                border: '1px solid #e8e8e8',
-                borderRadius: '8px'
+          <Content
+            style={{
+              padding: "20px",
+              display: "flex",
+              flexDirection: "column",
+              height: "100vh",
+              background: "#fff",
+            }}
+          >
+            <motion.div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                marginBottom: "20px",
+                padding: "10px",
+                border: "1px solid #e8e8e8",
+                borderRadius: "8px",
               }}
             >
               {messages.map((msg, index) => (
-                <motion.div 
-                  key={msg.id || index} 
+                <motion.div
+                  key={msg.id || index}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   style={{
-                    marginBottom: '15px',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    backgroundColor: msg.sender === 'user' ? '#e6f7ff' : 
-                                   msg.sender === 'bot' ? '#f6ffed' : '#f0f0f0',
-                    alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
-                    maxWidth: '80%',
-                    marginLeft: msg.sender === 'user' ? 'auto' : '0',
-                    marginRight: msg.sender === 'user' ? '0' : 'auto'
+                    marginBottom: "15px",
+                    padding: "10px",
+                    borderRadius: "8px",
+                    backgroundColor:
+                      msg.sender === "user"
+                        ? "#e6f7ff"
+                        : msg.sender === "bot"
+                        ? "#f6ffed"
+                        : "#f0f0f0",
+                    alignSelf:
+                      msg.sender === "user" ? "flex-end" : "flex-start",
+                    maxWidth: "80%",
+                    marginLeft: msg.sender === "user" ? "auto" : "0",
+                    marginRight: msg.sender === "user" ? "0" : "auto",
                   }}
                 >
                   <div>
-                    <strong>{msg.sender === 'user' ? 'You' : msg.sender === 'bot' ? 'Assistant' : 'System'}:</strong>
+                    <strong>
+                      {msg.sender === "user"
+                        ? "You"
+                        : msg.sender === "bot"
+                        ? "Assistant"
+                        : "System"}
+                      :
+                    </strong>
                   </div>
                   {msg.jsx ? (
                     msg.jsx
                   ) : (
                     <div
                       dangerouslySetInnerHTML={{
-                        __html: formatText(msg.text || msg.content || ''),
+                        __html: formatText(msg.text || msg.content || ""),
                       }}
                     />
                   )}
                 </motion.div>
               ))}
-              
+
               {isTyping && (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   style={{
-                    padding: '10px',
-                    backgroundColor: '#f6ffed',
-                    borderRadius: '8px',
-                    marginBottom: '10px'
+                    padding: "10px",
+                    backgroundColor: "#f6ffed",
+                    borderRadius: "8px",
+                    marginBottom: "10px",
                   }}
                 >
                   <strong>Assistant:</strong> {currentResponse}
-                  <Spin size="small" style={{ marginLeft: '10px' }} />
+                  <Spin size="small" style={{ marginLeft: "10px" }} />
                 </motion.div>
               )}
-              
+
               {loading && (
-                <div style={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  background: 'rgba(255,255,255,0.8)',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  zIndex: 1000
-                }}>
+                <div
+                  style={{
+                    position: "fixed",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: "rgba(255,255,255,0.8)",
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    zIndex: 1000,
+                  }}
+                >
                   <Loader />
                 </div>
               )}
-              
+
               <div ref={messagesEndRef} />
             </motion.div>
 
-            <div style={{ 
-              display: 'flex', 
-              gap: '10px', 
-              alignItems: 'center',
-              padding: '10px',
-              background: '#fafafa',
-              borderRadius: '8px'
-            }}>
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                alignItems: "center",
+                padding: "10px",
+                background: "#fafafa",
+                borderRadius: "8px",
+              }}
+            >
               <Input
                 value={input || messageInput}
                 onChange={(e) => {
@@ -1169,18 +1279,18 @@ const fetchSessions = async () => {
                 type={listening ? "danger" : "default"}
               />
 
-              <Button 
-                icon={<SendOutlined />} 
+              <Button
+                icon={<SendOutlined />}
                 onClick={handleSendMessage}
                 type="primary"
                 disabled={isTyping}
               />
             </div>
-            
+
             {audioUrl && (
-              <Button 
+              <Button
                 onClick={handlePlayAudio}
-                style={{ marginTop: '10px', alignSelf: 'center' }}
+                style={{ marginTop: "10px", alignSelf: "center" }}
               >
                 🔊 Play Audio Response
               </Button>
@@ -1195,8 +1305,7 @@ const fetchSessions = async () => {
         userProfile={userProfile}
         conversationHistory={audioConversationHistory}
       />
-  
-  </>
+    </>
   );
 };
 
