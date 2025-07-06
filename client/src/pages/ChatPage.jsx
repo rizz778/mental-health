@@ -344,37 +344,24 @@ const ChatPage = () => {
         setHasActiveSession(false);
         addSystemMessage("Session ended");
         break;
+
       case "text_chunk":
-        if (!data.complete) {
-          setIsTyping(true);
-          setCurrentResponse((prev) => {
-            const updated = prev + data.content;
-            console.log("Appending chunk:", data.content, "Updated:", updated);
-            currentResponseRef.current = updated;
-            return updated;
-          });
-        } else {
-          // Final chunk received
+        // Always append to a ref, not just state
+        if (typeof data.content === "string") {
+          currentResponseRef.current += data.content;
+          setCurrentResponse(currentResponseRef.current); // for typing indicator
+        }
+
+        if (data.complete) {
           setIsTyping(false);
-          if (currentResponseRef.current) {
-            // Save user message before model message
-            if (activeSession && messages.length > 0) {
-              const lastUserMsg = messages[messages.length - 1];
-              if (lastUserMsg.type === "user") {
-                saveMessage(activeSession, {
-                  sender: "user",
-                  type: "user",
-                  text: lastUserMsg.content,
-                  emotion: emotion.current,
-                  distress: distressScore,
-                  timestamp: lastUserMsg.timestamp,
-                });
-              }
-            }
+          if (
+            currentResponseRef.current &&
+            currentResponseRef.current.trim() !== ""
+          ) {
             addMessage("model", currentResponseRef.current);
-            // Save model message to backend after each model response
             if (activeSession) {
               saveMessage(activeSession, {
+                sender: "bot",
                 type: "model",
                 text: currentResponseRef.current,
                 timestamp: new Date().toISOString(),
@@ -383,6 +370,8 @@ const ChatPage = () => {
           }
           setCurrentResponse("");
           currentResponseRef.current = "";
+        } else {
+          setIsTyping(true);
         }
         break;
 
