@@ -160,11 +160,20 @@ class GeminiService:
                     elif getattr(response, "text", None) is not None:
                         print(f"[GeminiService] Received text for {client_id}: {response.text}")
                         print(response.text)
+                        # Always send the chunk
                         await self._safe_websocket_send(websocket, client_id, {
                             "type": "text_chunk",
                             "content": response.text,
                             "complete": False
                         })
+                        # If this is the last chunk, send complete=True
+                        if getattr(response, "generation_complete", False) or \
+                        (hasattr(response, "server_content") and getattr(response.server_content, "generation_complete", False)):
+                            await self._safe_websocket_send(websocket, client_id, {
+                                "type": "text_chunk",
+                                "content": "",
+                                "complete": True
+                            })
                     
                     elif getattr(response, "server_content", None):
                         if response.server_content.generation_complete:

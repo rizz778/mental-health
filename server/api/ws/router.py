@@ -12,11 +12,13 @@ from services.audio_service import AudioConnectionManager
 from google.genai import types
 from api.deps import get_gemini_service
 from api.deps import get_emotion_service
-import websockets
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='', tags=["ws"])
+
+# Store latest emotion per client
+client_emotions = {}
 
 def is_valid_turn(turn):
     return (
@@ -37,14 +39,12 @@ def get_config_from_setup(setup_data, default_model):
     session_resumption = setup_data.get("sessionResumption")
     gemini_config = dict(config)
 
-    # Compose system instruction with user profile and conversation history if present
     if systemContext:
         user_profile = systemContext.get("user_profile")
         conversation_history = systemContext.get("conversation_history")
         profile_str = f"User profile: {json.dumps(user_profile)}. " if user_profile else ""
         history_str = ""
         if conversation_history:
-            # Only include last 5 messages for brevity
             last_msgs = conversation_history[-5:]
             history_str = "Conversation so far: " + " ".join(
                 f"[{msg.get('sender','')}: {msg.get('text','')}]" for msg in last_msgs
@@ -69,95 +69,95 @@ async def websocket_endpoint(
     active_sessions = {}
     await websocket.accept()
     client_id = f"client_{id(websocket)}"
-   
     text_receive_task = None
-    
+
     try:
         try:
             setup_msg = await websocket.receive_text()
         except Exception as e:
             logger.warning(f"[WebSocket] Client {client_id} disconnected before sending setup: {e}")
             return 
+
         try:
             setup_data = json.loads(setup_msg)
         except json.JSONDecodeError:
             await websocket.send_json({"error": "Invalid JSON in setup message"})
             return
-        
+
         if not isinstance(setup_data, dict):
             await websocket.send_json({"error": "Setup message must be a JSON object"})
             return
-        
+
         if "setup" in setup_data:
-            try:
-                model, gemini_config = get_config_from_setup(setup_data["setup"], gemini_service.model)
-                response_modalities = gemini_config.get("responseModalities", ["TEXT"])
-                
-                if "TEXT" in response_modalities:
-                    session, session_cm = await gemini_service.start_session(gemini_config,model=model)
-                    import types as pytypes
-                    logger.info(f"[WebSocket] session type: {type(session)} session_cm type: {type(session_cm)}")
-                    logger.info(f"[WebSocket] session.receive type: {type(session.receive)}")
-                    result = session.receive()
-                    logger.info(f"[WebSocket] session.receive() returned: {type(result)}")
-                    # Do not await result here, just log type for diagnostics
-                    active_sessions[client_id] = {
-                        "session": session,
-                        "session_cm": session_cm,
-                        "websocket": websocket,
-                        "config": gemini_config,
-                        "session_handle": None,
-                        "initialized": True,
-                        "modalities": response_modalities
-                    }
-                    text_receive_task = asyncio.create_task(
-                        gemini_service.receive_responses(session, websocket, client_id, active_sessions)
-                    )
-                    logger.info(f"[WebSocket] Started TEXT modality task for {client_id}")
-                
+            # If it's an empty setup, this is likely an emotion-only WebSocket
+            if setup_data["setup"] == {}:
                 await websocket.send_json({"type": "setup_complete"})
-                
-            except Exception as session_error:
-                logger.error(f"[WebSocket] Failed to initialize session for {client_id}: {session_error}")
-                await websocket.send_json({"error": f"Session initialization failed: {str(session_error)}"})
-                return
+            else:
+                try:
+                    model, gemini_config = get_config_from_setup(setup_data["setup"], gemini_service.model)
+                    response_modalities = gemini_config.get("responseModalities", ["TEXT"])
+
+                    if "TEXT" in response_modalities:
+                        session, session_cm = await gemini_service.start_session(gemini_config, model=model)
+                        import types as pytypes
+                        logger.info(f"[WebSocket] session type: {type(session)} session_cm type: {type(session_cm)}")
+                        logger.info(f"[WebSocket] session.receive type: {type(session.receive)}")
+                        result = session.receive()
+                        logger.info(f"[WebSocket] session.receive() returned: {type(result)}")
+
+                        active_sessions[client_id] = {
+                            "session": session,
+                            "session_cm": session_cm,
+                            "websocket": websocket,
+                            "config": gemini_config,
+                            "session_handle": None,
+                            "initialized": True,
+                            "modalities": response_modalities
+                        }
+
+                        text_receive_task = asyncio.create_task(
+                            gemini_service.receive_responses(session, websocket, client_id, active_sessions)
+                        )
+                        logger.info(f"[WebSocket] Started TEXT modality task for {client_id}")
+
+                    await websocket.send_json({"type": "setup_complete"})
+
+                except Exception as session_error:
+                    logger.error(f"[WebSocket] Failed to initialize session for {client_id}: {session_error}")
+                    await websocket.send_json({"error": f"Session initialization failed: {str(session_error)}"})
+                    return
+
         else:
             await websocket.send_json({"error": "First message must be setup"})
             return
-        
+
         while True:
             msg = await websocket.receive_text()
-            logger.info(f"[WebSocket] Raw message received: {msg}")
             logger.info(f"[WebSocket] Received message: {msg}")
-            
+
             try:
                 data = json.loads(msg)
             except json.JSONDecodeError:
                 await websocket.send_json({"error": "Invalid JSON"})
                 continue
-            
+
             if not isinstance(data, dict):
                 await websocket.send_json({"error": "Message must be a JSON object"})
                 continue
-            
-            message_type = data.get("type")
-            
+
             if "clientContent" in data:
                 user_turns = data["clientContent"].get("turns", [])
                 turn_complete = data["clientContent"].get("turnComplete", True)
-                user_emotion = data["clientContent"].get("emotion")
 
-                # Inject emotion as a system message if present
-                if user_emotion:
+                # Inject latest emotion if available
+                latest_emotion = client_emotions.get(client_id)
+                if latest_emotion:
                     emotion_context = {
                         "role": "user",
                         "parts": [
-                            {
-                                "text": f"[User's current emotion detected: {user_emotion}]"
-                            }
+                            {"text": f"[User's current emotion: {latest_emotion}]"}
                         ]
                     }
-                    # Insert at the start of the turns list
                     user_turns = [emotion_context] + user_turns
 
                 if user_turns and all(is_valid_turn(turn) for turn in user_turns):
@@ -168,16 +168,7 @@ async def websocket_endpoint(
                             active_sessions[client_id]["session"] is not None):
 
                             session = active_sessions[client_id]["session"]
-                            await gemini_service.send_client_content(
-                                session,
-                                user_turns,
-                                turn_complete
-                            )
-                            user_messages = []
-                            for turn in user_turns:
-                                if turn.get("role") == "user":
-                                    for part in turn.get("parts", []):
-                                        user_messages.append({"type": "user", "content": part.get("text", "")})
+                            await gemini_service.send_client_content(session, user_turns, turn_complete)
 
                         else:
                             logger.error(f"[WebSocket] No text session available for {client_id}")
@@ -186,12 +177,12 @@ async def websocket_endpoint(
                         logger.error(f"[Gemini] Error sending turns: {e}")
                         await websocket.send_json({"error": f"Failed to send content: {str(e)}"})
                 else:
-                    logger.error(f"[Gemini] Invalid user_turns structure: {print.pformat(user_turns)}")
-                    await websocket.send_json({"error": "Invalid message format for Gemini"}) 
-                        
+                    logger.error(f"[Gemini] Invalid user_turns structure: {user_turns}")
+                    await websocket.send_json({"error": "Invalid message format for Gemini"})
+
             elif data.get("type") == "setup":
-                # Accept setup messages for emotion-only websocket clients
                 await websocket.send_json({"type": "setup_complete"})
+
             elif "frame" in data:
                 try:
                     frame_b64 = data["frame"]
@@ -199,7 +190,10 @@ async def websocket_endpoint(
                     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                     current_emotion = emotion_service.analyze_frame(frame)
                     aggregated = emotion_service.get_aggregated_emotion()
-                    # Only log the captured emotion
+
+                    # Store latest emotion for this client
+                    client_emotions[client_id] = current_emotion
+
                     logger.info(f"[Emotion] Captured: current={current_emotion}, aggregated={aggregated}")
                     await websocket.send_json({
                         "emotion": {
@@ -209,12 +203,13 @@ async def websocket_endpoint(
                     })
                 except Exception as e:
                     await websocket.send_json({"error": "Emotion processing failed"})
+
             else:
                 await websocket.send_json({"error": "Unsupported message format"})
-    
+
     except Exception as e:
         logger.error(f"Error handling client {client_id}: {e}")
-    
+
     finally:
         if text_receive_task and not text_receive_task.done():
             text_receive_task.cancel()
@@ -224,7 +219,7 @@ async def websocket_endpoint(
                 pass
             except Exception as task_error:
                 logger.error(f"Error cancelling text receive task for {client_id}: {task_error}")
-        
+
         if client_id in active_sessions:
             try:
                 session_data = active_sessions[client_id]
@@ -236,8 +231,12 @@ async def websocket_endpoint(
             except Exception as cleanup_error:
                 logger.error(f"Error cleaning up session for {client_id}: {cleanup_error}")
             del active_sessions[client_id]
-        
+
+        if client_id in client_emotions:
+            del client_emotions[client_id]
+
         logger.info(f"[WebSocket] Cleanup completed for {client_id}")
+
 
 audio_manager = AudioConnectionManager()
 
@@ -252,10 +251,9 @@ async def audio_websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            # Handle setup with user profile and conversation history
+
             if message.get("type") == "setup":
                 config = message.get("config", {})
-                # Extract user profile and conversation history
                 system_context = config.get("systemContext")
                 user_profile = None
                 conversation_history = None
@@ -278,18 +276,20 @@ async def audio_websocket_endpoint(websocket: WebSocket):
                 if gemini_client:
                     await gemini_client.send_setup(config,system_instruction)
                 await websocket.send_json({"type": "setup_complete"})
+
             elif message.get("type") == "audio_input":
                 audio_data = message.get("audio_data", "")
                 if audio_data:
                     gemini_client = audio_manager.active_connections.get(websocket)
                     if gemini_client:
                         await gemini_client.send_audio(audio_data)
+
             elif message.get("type") == "text_input":
                 text = message.get("text", "")
                 if text:
                     gemini_client = audio_manager.active_connections.get(websocket)
                     if gemini_client:
                         await gemini_client.send_text(text)
-            # else: just ignore unknown types
+
     except Exception:
         await audio_manager.disconnect(websocket)
