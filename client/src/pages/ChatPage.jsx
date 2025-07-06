@@ -867,7 +867,7 @@ const ChatPage = () => {
           type: "user",
           text: secondLast.content,
           emotion: emotion.current,
-          distress: distressScore,
+          distressScore: distressScore,
           timestamp: secondLast.timestamp,
         });
       }
