@@ -8,6 +8,7 @@ const GeminiAudioChatModal = ({
   userProfile,
   conversationHistory,
   sessionId,
+  onAudioChatClose
 }) => {
   const [isCalling, setIsCalling] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -55,16 +56,16 @@ const GeminiAudioChatModal = ({
   const currentOutputTranscriptRef = useRef("");
   const NODE_BACKEND_URL = "http://localhost:4000";
   // Audio configuration
-  const AUDIO_CONFIG = {
-    sampleRate: 24000, // Match backend sample rate
-    bufferSize: 4096,
-    minBufferChunks: 5, // Buffer more chunks before playback
-    maxBufferChunks: 10,
-    crossfadeDuration: 0.05, // 50ms crossfade
-    lookAheadTime: 0.1, // 100ms lookahead
-    targetLatency: 0.05, // 50ms target latency
-  };
-
+// Increase buffer sizes for smoother playback
+const AUDIO_CONFIG = {
+  sampleRate: 24000,
+  bufferSize: 12288,
+  minBufferChunks: 10,
+  maxBufferChunks: 25,
+  crossfadeDuration: 0.01,
+  lookAheadTime: 0.02,
+  targetLatency: 0.02,
+};
   const addLog = useCallback((message, type = "info") => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs((prev) => [...prev.slice(-50), { timestamp, message, type }]);
@@ -952,7 +953,24 @@ const GeminiAudioChatModal = ({
       clearAudioQueue();
     };
   }, []);
-
+  const handleClose = () => {
+    // Disconnect Gemini audio session and clean up resources
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (isRecording) {
+      stopRecording();
+    }
+    clearAudioQueue();
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+      audioContextReadyRef.current = false;
+    }
+    if (onClose) onClose();
+    if (onAudioChatClose) onAudioChatClose(sessionId);
+  };
   useEffect(() => {
     let audioCtx, source, processor, stream;
     let isSpeech = false;
@@ -1044,7 +1062,7 @@ const GeminiAudioChatModal = ({
     if (connectionStatus === "connected") {
       startVAD();
     }
-
+ 
     return () => {
       if (processor) processor.disconnect();
       if (source) source.disconnect();
@@ -1052,16 +1070,40 @@ const GeminiAudioChatModal = ({
       if (stream) stream.getTracks().forEach((t) => t.stop());
     };
   }, [connectionStatus]);
-
+  // Re-initiate Gemini audio session when modal is opened
+useEffect(() => {
+  if (visible) {
+    // Reset connection state and logs
+    setIsCalling(false);
+    setIsConnected(false);
+    setIsRecording(false);
+    setIsMuted(false);
+    setConnectionStatus("disconnected");
+    setLogs([]);
+    setAudioQueueLength(0);
+    setIsPlaying(false);
+    setInputTranscript("");
+    setOutputTranscript("");
+    setDistress(0);
+    setLog("");
+    currentInputTranscriptRef.current = "";
+    currentOutputTranscriptRef.current = "";
+    // Optionally, re-initialize audio context if needed
+    initializeAudioContext();
+    // Optionally, auto-connect to backend if desired
+    // connectToBackend();
+  }
+  // No cleanup needed here; handled by other effects
+}, [visible]);
   return (
     <Modal
       title="Gemini Audio Chat"
       visible={visible}
-      onCancel={onClose}
+      onCancel={handleClose}
       footer={[
         <Button
           key="close"
-          onClick={onClose}
+          onClick={handleClose}
           disabled={isCalling || isRecording}
         >
           Close

@@ -81,6 +81,24 @@ def get_config_from_setup(setup_data, default_model):
         if session_resumption:
             gemini_config["session_resumption"] = types.SessionResumptionConfig(handle=session_resumption.get("handle"))
         return model, gemini_config
+                # Compose system instruction
+        
+        if user_profile:
+            system_instruction += f"User profile: {json.dumps(user_profile)}. "
+            if conversation_history and isinstance(conversation_history, list) and len(conversation_history) > 0:
+                last_msgs = conversation_history[-5:] if len(conversation_history) > 5 else conversation_history
+                history_str = "Conversation so far: " + " ".join(
+                        f"[{msg.get('sender','')}: {msg.get('text','')} ]" for msg in last_msgs
+                    )
+                system_instruction += history_str
+        
+    if system_instruction:
+        gemini_config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
+    if tools:
+        gemini_config["tools"] = tools
+    if session_resumption:
+        gemini_config["session_resumption"] = types.SessionResumptionConfig(handle=session_resumption.get("handle"))
+    return model, gemini_config
 
 
 @router.websocket("/")
