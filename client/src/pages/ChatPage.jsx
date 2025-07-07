@@ -898,7 +898,29 @@ const ChatPage = () => {
       });
       if (!res.ok) throw new Error("Failed to fetch user profile");
       const data = await res.json();
-      setUserProfile(data.userProfile);
+      // If your API returns { userProfile: { ... } }
+      const raw = data.userProfile || data;
+
+      // Map backend fields to Gemini fields
+      const mappedProfile = {
+        name: raw.name,
+        age: raw.age,
+        gender: raw.gender,
+        stressFrequency: raw.stressFrequency,
+        sleep: raw.sleepHours ? `${raw.sleepHours} hours/night` : undefined,
+        exercise: raw.exerciseFrequency,
+        triggers: raw.triggers || [],
+        copingMechanisms: raw.copingMechanisms || [],
+        supportSystem: raw.hasSupportSystem === true ? "Yes" : "No",
+        preferredLanguage: raw.preferredLanguage,
+        responseStyle: raw.responsePreference,
+        preferences: [
+          ...(raw.wantsAffirmations ? ["Daily Affirmations"] : []),
+          ...(raw.wantsReminders ? ["Wellness Check-ins"] : []),
+        ],
+      };
+
+      setUserProfile(mappedProfile);
     } catch (err) {
       console.error("Error fetching user profile:", err);
       setUserProfile(null);
@@ -907,26 +929,30 @@ const ChatPage = () => {
     }
   };
 
+  useEffect(() => {
+    fetchUserProfile();
+  }, []);
   // Gemini session setup with context (now async, fetches user profile and session messages)
   const setupGeminiSession = useCallback(
-    (sessionId) => {
+    async (sessionId) => {
       try {
-        // Prepare conversation history for Gemini
-        const conversation_history = (messages || []).map((msg) => ({
-          sender: msg.sender,
-          type: msg.type,
-          text: msg.text || msg.content || "",
-          timestamp: msg.timestamp,
-          emotion: msg.emotion,
-          distress: msg.distress,
-        }));
+        // Only include user and model messages
+        const conversation_history = (messages || [])
+          .filter((msg) => msg.type === "user" || msg.type === "model")
+          .map((msg) => ({
+            sender: msg.sender,
+            type: msg.type,
+            text: msg.text || msg.content || "",
+            timestamp: msg.timestamp,
+            emotion: msg.emotion,
+            distress: msg.distress,
+          }));
 
         const systemContext = {
           user_profile: userProfile,
           conversation_history,
         };
-        console.log("User Profile Text:", userProfile);
-        console.log("Text conversation:", conversation_history);
+
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(
             JSON.stringify({
@@ -943,7 +969,7 @@ const ChatPage = () => {
         console.error("Failed to setup Gemini session with context:", err);
       }
     },
-    [systemInstruction, toolsEnabled]
+    [systemInstruction, toolsEnabled, messages, userProfile]
   );
   // Connect and setup session when active session changes
   useEffect(() => {
@@ -1019,11 +1045,18 @@ const ChatPage = () => {
   );
 
   // Helper to close the main chat WebSocket connection
-
-  // Handle audio chat modal close: fetch messages and reinitiate Gemini text chat session
-  const handleAudioChatClose = async (sessionId) => {
-    if (!sessionId) return;
-    await fetchMessages(sessionId); // Refresh messages from backend
+  const closeChatSocket = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+      setIsConnected(false);
+      setConnectionStatus("Disconnected");
+      setHasActiveSession(false);
+      setIsTyping(false);
+      setCurrentResponse("");
+      currentResponseRef.current = "";
+      addSystemMessage("Disconnected from server (closed for audio modal)");
+    }
   };
 
   return (
@@ -1108,6 +1141,7 @@ const ChatPage = () => {
               type="primary"
               icon={<PhoneOutlined />}
               onClick={() => {
+                closeChatSocket();
                 setIsAudioModalVisible(true);
               }}
               style={{
@@ -1312,7 +1346,6 @@ const ChatPage = () => {
         userProfile={userProfile}
         conversationHistory={audioConversationHistory}
         sessionId={activeSession}
-        onAudioChatClose={handleAudioChatClose}
       />
     </>
   );
