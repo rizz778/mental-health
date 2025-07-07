@@ -889,18 +889,18 @@ const ChatPage = () => {
       });
       if (!res.ok) throw new Error("Failed to fetch user profile");
       const data = await res.json();
-      setUserProfile(data);
+      setUserProfile(data.userProfile);
     } catch (err) {
       console.error("Error fetching user profile:", err);
       return null;
     }
   };
 
-  // Gemini session setup with context (now async, fetches user profile and session messages)
+  // Gemini session setup with context (uses current state, no redundant fetches)
   const setupGeminiSession = useCallback(
-    async (sessionId) => {
+    (sessionId) => {
       try {
-        // Prepare conversation history for Gemini
+        // Prepare conversation history for Gemini from current state
         const conversation_history = (messages || []).map((msg) => ({
           sender: msg.sender,
           type: msg.type,
@@ -914,7 +914,8 @@ const ChatPage = () => {
           user_profile: userProfile,
           conversation_history,
         };
-
+        console.log("User Profile Text:", userProfile);
+        console.log("Text conversation:", conversation_history);
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(
             JSON.stringify({
@@ -931,7 +932,7 @@ const ChatPage = () => {
         console.error("Failed to setup Gemini session with context:", err);
       }
     },
-    [systemInstruction, toolsEnabled]
+    [systemInstruction, toolsEnabled, userProfile, messages]
   );
 
   // Connect and setup session when active session changes
@@ -942,7 +943,7 @@ const ChatPage = () => {
       connect();
     }
 
-    const timeout = setTimeout(() => {
+   const timeout = setTimeout(() => {
       setupGeminiSession(activeSession);
     }, 500);
     return () => clearTimeout(timeout);
@@ -993,18 +994,12 @@ const ChatPage = () => {
   );
 
   // Helper to close the main chat WebSocket connection
-  const closeChatSocket = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-      setIsConnected(false);
-      setConnectionStatus("Disconnected");
-      setHasActiveSession(false);
-      setIsTyping(false);
-      setCurrentResponse("");
-      currentResponseRef.current = "";
-      addSystemMessage("Disconnected from server (closed for audio modal)");
-    }
+
+
+  // Handle audio chat modal close: fetch messages and reinitiate Gemini text chat session
+  const handleAudioChatClose = async (sessionId) => {
+    if (!sessionId) return;
+    await fetchMessages(sessionId); // Refresh messages from backend
   };
 
   return (
@@ -1089,7 +1084,6 @@ const ChatPage = () => {
               type="primary"
               icon={<PhoneOutlined />}
               onClick={() => {
-                closeChatSocket();
                 setIsAudioModalVisible(true);
               }}
               style={{
@@ -1294,6 +1288,7 @@ const ChatPage = () => {
         userProfile={userProfile}
         conversationHistory={audioConversationHistory}
         sessionId={activeSession}
+        onAudioChatClose={handleAudioChatClose}
       />
     </>
   );
