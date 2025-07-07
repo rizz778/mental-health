@@ -42,22 +42,45 @@ def get_config_from_setup(setup_data, default_model):
     if systemContext:
         user_profile = systemContext.get("user_profile")
         conversation_history = systemContext.get("conversation_history")
-        profile_str = f"User profile: {json.dumps(user_profile)}. " if user_profile else ""
+        # Format profile for LLM
+        if user_profile:
+           profile_str = (
+        f"The user's name is {user_profile.get('name', 'Unknown')}. "
+        f"Age: {user_profile.get('age', 'Unknown')}, Gender: {user_profile.get('gender', 'Unknown')}. "
+        f"Stress Frequency: {user_profile.get('stressFrequency', 'Unknown')}. "
+        f"Sleep: {user_profile.get('sleep', 'Unknown')}. "
+        f"Exercise: {user_profile.get('exercise', 'Unknown')}. "
+        f"Triggers: {', '.join(user_profile.get('triggers', []))}. "
+        f"Coping Mechanisms: {', '.join(user_profile.get('copingMechanisms', []))}. "
+        f"Support System: {user_profile.get('supportSystem', 'Unknown')}. "
+        f"Preferred Language: {user_profile.get('preferredLanguage', 'Unknown')}. "
+        f"Response Style: {user_profile.get('responseStyle', 'Unknown')}. "
+        f"Preferences: {', '.join(user_profile.get('preferences', []))}. "
+        "You MUST use this information when answering questions about the user. "
+        "If the user asks for their name, always use the name from the profile above. "
+        "If the user asks about themselves, always refer to the profile above. "
+        "Never say you don't have access to the user's information."
+        "Don't use asterisks for emphasis, use all caps instead. "
+    )
+        else:
+            profile_str = ""
         history_str = ""
         if conversation_history:
             last_msgs = conversation_history[-5:]
             history_str = "Conversation so far: " + " ".join(
                 f"[{msg.get('sender','')}: {msg.get('text','')}]" for msg in last_msgs
             )
-        system_instruction = f"{profile_str}{history_str} {system_instruction or ''}".strip()
 
-    if system_instruction:
-        gemini_config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
-    if tools:
-        gemini_config["tools"] = tools
-    if session_resumption:
-        gemini_config["session_resumption"] = types.SessionResumptionConfig(handle=session_resumption.get("handle"))
-    return model, gemini_config
+        logger.info(f"[Gemini Setup] Profile info being sent: {profile_str}")
+        logger.info(f"[Gemini Setup] Conversation history being sent: {history_str}")
+        system_instruction = f"{profile_str}{history_str} {system_instruction or ''}".strip()
+        if system_instruction:
+            gemini_config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
+        if tools:
+            gemini_config["tools"] = tools
+        if session_resumption:
+            gemini_config["session_resumption"] = types.SessionResumptionConfig(handle=session_resumption.get("handle"))
+        return model, gemini_config
 
 
 @router.websocket("/")

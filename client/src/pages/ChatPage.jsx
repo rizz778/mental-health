@@ -77,10 +77,11 @@ const ChatPage = () => {
 
   // Config
   const [systemInstruction, setSystemInstruction] = useState(
-    "Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
+    // "You are a helpful assistant. The user's profile and recent conversation are provided. Use the user's name and any relevant profile information in your responses. If the user asks for their name, use the name from the profile. Be supportive and empathetic.Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
+    "You are a helpful assistant. The user's profile and recent conversation are provided. Use the user's name and any relevant profile information in your responses. If the user asks for their name, use the name from the profile. Be supportive and empathetic."
   );
   const [wsUrl, setWsUrl] = useState("ws://localhost:8000");
-
+  const [profileLoading, setProfileLoading] = useState(true);
   // Stats
   const [totalTokens, setTotalTokens] = useState(0);
 
@@ -525,10 +526,22 @@ const ChatPage = () => {
     try {
       wsRef.current = new WebSocket(url);
 
+      // ...existing code...
       wsRef.current.onopen = () => {
         setIsConnected(true);
         setConnectionStatus("Connected");
         showSuccess("Connected to WebSocket server");
+
+        // Prepare conversation history for Gemini
+        const conversation_history = (messages || []).map((msg) => ({
+          sender: msg.sender,
+          type: msg.type,
+          text: msg.text || msg.content || "",
+          timestamp: msg.timestamp,
+          emotion: msg.emotion,
+          distress: msg.distress,
+        }));
+
         const setupMsg = {
           setup: {
             model: "gemini-2.0-flash-live-001",
@@ -537,21 +550,18 @@ const ChatPage = () => {
             },
             systemInstruction: systemInstruction.trim() || undefined,
             tools: toolsEnabled ? [{}] : undefined,
+            systemContext: {
+              user_profile: userProfile,
+              conversation_history,
+            },
             ...(resumeHandle
               ? { sessionResumption: { handle: resumeHandle } }
               : {}),
           },
         };
         wsRef.current.send(JSON.stringify(setupMsg));
-        if (resumeHandle) {
-          console.log(
-            "[Client] Reconnected and sent setup with resume handle:",
-            resumeHandle
-          );
-        }
-        setResumeHandle(null);
+        // ...existing code...
       };
-
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -827,9 +837,7 @@ const ChatPage = () => {
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
-  useEffect(() => {
-    fetchUserProfile();
-  }, []);
+
   // When switching sessions, fetch messages from backend
   useEffect(() => {
     if (activeSession) {
@@ -883,32 +891,62 @@ const ChatPage = () => {
 
   // Fetch user profile from backend
   const fetchUserProfile = async () => {
+    setProfileLoading(true);
     try {
       const res = await fetch(`${NODE_BACKEND_URL}/api/profile`, {
         headers: { ...getAuthHeaders() },
       });
       if (!res.ok) throw new Error("Failed to fetch user profile");
       const data = await res.json();
-      setUserProfile(data);
+      // If your API returns { userProfile: { ... } }
+      const raw = data.userProfile || data;
+
+      // Map backend fields to Gemini fields
+      const mappedProfile = {
+        name: raw.name,
+        age: raw.age,
+        gender: raw.gender,
+        stressFrequency: raw.stressFrequency,
+        sleep: raw.sleepHours ? `${raw.sleepHours} hours/night` : undefined,
+        exercise: raw.exerciseFrequency,
+        triggers: raw.triggers || [],
+        copingMechanisms: raw.copingMechanisms || [],
+        supportSystem: raw.hasSupportSystem === true ? "Yes" : "No",
+        preferredLanguage: raw.preferredLanguage,
+        responseStyle: raw.responsePreference,
+        preferences: [
+          ...(raw.wantsAffirmations ? ["Daily Affirmations"] : []),
+          ...(raw.wantsReminders ? ["Wellness Check-ins"] : []),
+        ],
+      };
+
+      setUserProfile(mappedProfile);
     } catch (err) {
       console.error("Error fetching user profile:", err);
-      return null;
+      setUserProfile(null);
+    } finally {
+      setProfileLoading(false);
     }
   };
 
+  useEffect(() => {
+    fetchUserProfile();
+  }, []);
   // Gemini session setup with context (now async, fetches user profile and session messages)
   const setupGeminiSession = useCallback(
     async (sessionId) => {
       try {
-        // Prepare conversation history for Gemini
-        const conversation_history = (messages || []).map((msg) => ({
-          sender: msg.sender,
-          type: msg.type,
-          text: msg.text || msg.content || "",
-          timestamp: msg.timestamp,
-          emotion: msg.emotion,
-          distress: msg.distress,
-        }));
+        // Only include user and model messages
+        const conversation_history = (messages || [])
+          .filter((msg) => msg.type === "user" || msg.type === "model")
+          .map((msg) => ({
+            sender: msg.sender,
+            type: msg.type,
+            text: msg.text || msg.content || "",
+            timestamp: msg.timestamp,
+            emotion: msg.emotion,
+            distress: msg.distress,
+          }));
 
         const systemContext = {
           user_profile: userProfile,
@@ -931,12 +969,20 @@ const ChatPage = () => {
         console.error("Failed to setup Gemini session with context:", err);
       }
     },
-    [systemInstruction, toolsEnabled]
+    [systemInstruction, toolsEnabled, messages, userProfile]
   );
-
   // Connect and setup session when active session changes
   useEffect(() => {
-    if (!activeSession) return;
+    if (
+      profileLoading ||
+      !activeSession ||
+      !userProfile ||
+      Object.keys(userProfile).length === 0 ||
+      !Array.isArray(messages) ||
+      messages.length === 0
+    ) {
+      return;
+    }
 
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       connect();
@@ -946,7 +992,13 @@ const ChatPage = () => {
       setupGeminiSession(activeSession);
     }, 500);
     return () => clearTimeout(timeout);
-  }, [activeSession, setupGeminiSession]);
+  }, [
+    activeSession,
+    userProfile,
+    messages,
+    setupGeminiSession,
+    profileLoading,
+  ]);
 
   // Mock CameraTest component
   const CameraTest = ({ isVisible, onClose }) => (
