@@ -898,7 +898,7 @@ const ChatPage = () => {
       });
       if (!res.ok) throw new Error("Failed to fetch user profile");
       const data = await res.json();
-      setUserProfile(data);
+      setUserProfile(data.userProfile);
     } catch (err) {
       console.error("Error fetching user profile:", err);
       setUserProfile(null);
