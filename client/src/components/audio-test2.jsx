@@ -976,8 +976,46 @@ const AUDIO_CONFIG = {
     let isSpeech = false;
     let silenceFrames = 0;
     let speechChunks = [];
-    const SILENCE_THRESHOLD = 0.01; // Adjust for sensitivity
-    const SILENCE_FRAMES_TO_STOP = 10; // ~0.2s at 50ms per frame
+    let speechStartTime = null;
+    let debounceTimeout = null;
+    let listening = true;
+    const SILENCE_THRESHOLD = 0.008;
+    const SILENCE_FRAMES_TO_STOP = 12;
+    const MIN_SPEECH_DURATION_MS = 400;
+    const DEBOUNCE_AFTER_SEND_MS = 350;
+
+    const handleVADProcess = (event) => {
+      if (!listening) return;
+      const input = event.inputBuffer.getChannelData(0);
+      const energy = Math.sqrt(input.reduce((a, b) => a + b * b, 0) / input.length);
+      if (energy > SILENCE_THRESHOLD) {
+        if (!isSpeech) {
+          isSpeech = true;
+          speechChunks = [];
+          speechStartTime = Date.now();
+        }
+        speechChunks.push(new Float32Array(input));
+        silenceFrames = 0;
+      } else if (isSpeech) {
+        silenceFrames++;
+        speechChunks.push(new Float32Array(input));
+        if (silenceFrames > SILENCE_FRAMES_TO_STOP) {
+          isSpeech = false;
+          silenceFrames = 0;
+          const speechDuration = Date.now() - (speechStartTime || Date.now());
+          if (speechDuration >= MIN_SPEECH_DURATION_MS) {
+            sendSpeech(speechChunks);
+          } else {
+            addLog(`Speech too short (${speechDuration}ms), not sending`, "info");
+          }
+          speechChunks = [];
+          listening = false;
+          debounceTimeout = setTimeout(() => {
+            listening = true;
+          }, DEBOUNCE_AFTER_SEND_MS);
+        }
+      }
+    };
 
     const startVAD = async () => {
       try {
@@ -995,35 +1033,7 @@ const AUDIO_CONFIG = {
         });
         source = audioCtx.createMediaStreamSource(stream);
         processor = audioCtx.createScriptProcessor(4096, 1, 1);
-
-        processor.onaudioprocess = (event) => {
-          const input = event.inputBuffer.getChannelData(0);
-          const energy = Math.sqrt(
-            input.reduce((a, b) => a + b * b, 0) / input.length
-          );
-
-          if (energy > SILENCE_THRESHOLD) {
-            // Speech detected
-            if (!isSpeech) {
-              isSpeech = true;
-              speechChunks = [];
-            }
-            speechChunks.push(new Float32Array(input));
-            silenceFrames = 0;
-          } else if (isSpeech) {
-            // Silence after speech
-            silenceFrames++;
-            speechChunks.push(new Float32Array(input));
-            if (silenceFrames > SILENCE_FRAMES_TO_STOP) {
-              // Speech ended, send audio
-              isSpeech = false;
-              silenceFrames = 0;
-              sendSpeech(speechChunks);
-              speechChunks = [];
-            }
-          }
-        };
-
+        processor.onaudioprocess = handleVADProcess;
         source.connect(processor);
         processor.connect(audioCtx.destination);
       } catch (err) {
@@ -1062,8 +1072,9 @@ const AUDIO_CONFIG = {
     if (connectionStatus === "connected") {
       startVAD();
     }
- 
+
     return () => {
+      if (debounceTimeout) clearTimeout(debounceTimeout);
       if (processor) processor.disconnect();
       if (source) source.disconnect();
       if (audioCtx) audioCtx.close();

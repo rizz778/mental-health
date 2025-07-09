@@ -280,52 +280,11 @@ const ChatPage = () => {
       return;
     }
 
-    // if (data.serverContent) {
-    //   const modelTurn = data.serverContent.modelTurn;
-    //   if (modelTurn && modelTurn.parts && modelTurn.parts.length > 0) {
-    //     const text = modelTurn.parts[0].text;
-    //     setCurrentResponse((prev) => {
-    //       const updated = prev + text;
-    //       currentResponseRef.current = updated;
-    //       return updated;
-    //     });
-    //     setIsTyping(true);
-    //   }
-    //   if (data.serverContent.generationComplete) {
-    //     if (currentResponseRef.current) {
-    //       // Save user message before model message
-    //       if (activeSession && messages.length > 0) {
-    //         const lastUserMsg = messages[messages.length - 1];
-    //         if (lastUserMsg.type === "user") {
-    //           saveMessage(activeSession, {
-    //             sender: "user",
-    //             type: "user",
-    //             text: lastUserMsg.content,
-    //             emotion: emotion.current,
-    //             distress: distressScore,
-    //             timestamp: lastUserMsg.timestamp,
-    //           });
-    //         }
-    //       }
-    //       addMessage("model", currentResponseRef.current);
-    //       // Save model message to backend after each model response
-    //       if (activeSession) {
-    //         saveMessage(activeSession, {
-    //           type: "model",
-    //           text: currentResponseRef.current,
-    //           timestamp: new Date().toISOString(),
-    //         });
-    //       }
-    //     }
-    //     setCurrentResponse("");
-    //     currentResponseRef.current = "";
-    //     setIsTyping(false);
-    //   }
-    //   if (data.serverContent.turnComplete) {
-    //     console.log("[Client] Turn complete");
-    //   }
-    //   return;
-    // }
+    // Defensive: If Gemini returns an unsupported format, log to console but do not show UI error
+    if (!data.type && !data.serverContent && !data.text_chunk && !data.generation_complete) {
+      console.warn("Received unsupported message format:", data);
+      return;
+    }
 
     switch (data.type) {
       case "connection_established":
@@ -434,7 +393,8 @@ const ChatPage = () => {
         setIsTyping(false);
         setCurrentResponse("");
         currentResponseRef.current = "";
-        showError(data.message || "An error occurred");
+        // Do not show error in UI for Gemini errors; just log
+        console.error("[Gemini] Error message:", data.message || "An error occurred");
         break;
       case "session_resumption_update":
         if (data.handle) {
@@ -473,7 +433,7 @@ const ChatPage = () => {
 
   const showError = (message) => {
     setErrorMessage(message);
-    antdMessage.error(message);
+  
     console.error("[Client] Error:", message);
   };
 
@@ -708,7 +668,12 @@ const ChatPage = () => {
       }
     }
   };
-
+const handleAudioChatClose = async (sessionId) => {
+    if (!sessionId) return;
+    await fetchMessages(sessionId); // Refresh messages from backend
+    // Re-initiate Gemini session with updated conversation history
+    setupGeminiSession(sessionId);
+  };
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -769,7 +734,13 @@ const ChatPage = () => {
       );
       const data = await res.json();
       if (data.messages) {
-        const formattedMessages = data.messages.map((msg, idx) => {
+        // Sort messages by timestamp (or fallback to _id if timestamp missing)
+        const sortedMessages = [...data.messages].sort((a, b) => {
+          const aTime = a.timestamp ? new Date(a.timestamp).getTime() : (a._id || 0);
+          const bTime = b.timestamp ? new Date(b.timestamp).getTime() : (b._id || 0);
+          return aTime - bTime;
+        });
+        const formattedMessages = sortedMessages.map((msg, idx) => {
           // Robustly map backend message fields to UI format
           let sender = "system";
           if (msg.sender === "user" || msg.type === "user") sender = "user";
@@ -1141,7 +1112,6 @@ const ChatPage = () => {
               type="primary"
               icon={<PhoneOutlined />}
               onClick={() => {
-                closeChatSocket();
                 setIsAudioModalVisible(true);
               }}
               style={{
@@ -1346,6 +1316,7 @@ const ChatPage = () => {
         userProfile={userProfile}
         conversationHistory={audioConversationHistory}
         sessionId={activeSession}
+        onAudioChatClose={handleAudioChatClose}
       />
     </>
   );
