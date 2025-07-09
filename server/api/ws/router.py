@@ -29,6 +29,12 @@ def is_valid_turn(turn):
         and all(isinstance(part, dict) and "text" in part for part in turn["parts"])
     )
 
+EMPATHY_INSTRUCTION = (
+    "Whenever you receive a user's current emotion, always acknowledge it explicitly in your reply, "
+    "mention the emotion, and respond with empathy and support tailored to that emotion. Never ignore the user's emotion."
+)
+        
+
 def get_config_from_setup(setup_data, default_model):
     print("[DEBUG] setup_data received:", setup_data)
     model = setup_data.get("model", default_model)
@@ -61,6 +67,8 @@ def get_config_from_setup(setup_data, default_model):
         "If the user asks about themselves, always refer to the profile above. "
         "Never say you don't have access to the user's information."
         "Don't use asterisks for emphasis, use all caps instead. "
+        "Whenever you receive a user's current emotion, always acknowledge it explicitly in your reply, mention the emotion, and respond with empathy and support tailored to that emotion. Never ignore the user's emotion."
+
     )
         else:
             profile_str = ""
@@ -74,6 +82,9 @@ def get_config_from_setup(setup_data, default_model):
         logger.info(f"[Gemini Setup] Profile info being sent: {profile_str}")
         logger.info(f"[Gemini Setup] Conversation history being sent: {history_str}")
         system_instruction = f"{profile_str}{history_str} {system_instruction or ''}".strip()
+
+        if EMPATHY_INSTRUCTION not in system_instruction:
+            system_instruction = f"{system_instruction}\n{EMPATHY_INSTRUCTION}".strip()
         if system_instruction:
             gemini_config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
         if tools:
@@ -189,17 +200,21 @@ async def websocket_endpoint(
             if "clientContent" in data:
                 user_turns = data["clientContent"].get("turns", [])
                 turn_complete = data["clientContent"].get("turnComplete", True)
+                # NEW: Update latest emotion from payload if present
+                emotion_from_client = data["clientContent"].get("emotion")
+                if emotion_from_client:
+                    client_emotions[client_id] = emotion_from_client
 
-                # Inject latest emotion if available
                 latest_emotion = client_emotions.get(client_id)
+                print(f"[DEBUG] Latest emotion for {client_id}: {latest_emotion}")
                 if latest_emotion:
                     emotion_context = {
                         "role": "user",
                         "parts": [
-                            {"text": f"[User's current emotion: {latest_emotion}]"}
+                            {"text": f"My current emotion is {latest_emotion}."}
                         ]
                     }
-                    user_turns = [emotion_context] + user_turns
+                    user_turns = user_turns + [emotion_context]
 
                 if user_turns and all(is_valid_turn(turn) for turn in user_turns):
                     try:
