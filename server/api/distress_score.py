@@ -10,7 +10,7 @@ class DistressRequest(BaseModel):
 @router.post("/api/distress-score")
 async def distress_score_endpoint(request: DistressRequest):
     try:
-        score = llm_distress_score(request.text)
+        score = llm_distress_score(request.text,request.conversationHistory)
         return {"score": score}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

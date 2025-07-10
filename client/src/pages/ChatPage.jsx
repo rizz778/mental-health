@@ -583,11 +583,29 @@ const ChatPage = () => {
       const response = await fetch(`${GEMINI_BACKEND_URL}/api/distress-score`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: inputText }),
+        body: JSON.stringify({ text: inputText, conversationHistory:messages }),
       });
       if (!response.ok) throw new Error("API error");
       const data = await response.json();
       setDistressScore(data.score);
+      if (data.score >= 7) {
+        notification.warning({
+          message: 'You may need support',
+          description: (
+            <div>
+              <div>Your distress score is high. Consider reaching out for help:</div>
+              <ul style={{ margin: '8px 0 0 0', padding: 0, listStyle: 'none' }}>
+                <li><Link to="/helpline">Helpline Resources</Link></li>
+                <li><Link to="/therapists">Book a Therapist</Link></li>
+                <li><Link to="/relaxationtools">Relaxation Tools</Link></li>
+              </ul>
+            </div>
+          ),
+          placement: 'topRight',
+          duration: 0,
+          style: { width: 340 },
+        });
+      }
       // Log distress score and emotion immediately after update
       setTimeout(() => {
         console.log("[Distress] API response:", data); // Log full API response

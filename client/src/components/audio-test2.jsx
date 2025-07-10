@@ -441,14 +441,16 @@ const AUDIO_CONFIG = {
                 console.log("[saveMessage] User Distress:", currentDistress);
                 addLog(`[saveMessage] User Emotion: ${savedEmotion}`, "info");
                 addLog(`[saveMessage] User Distress: ${savedDistress}`, "info");
-                const saveResult = saveMessage(sessionId, {
+                const inputDict={
                   sender: "user",
                   type: "user",
                   text: currentInputTranscriptRef.current,
                   emotion: savedEmotion,
                   distressScore: savedDistress,
                   timestamp: new Date().toISOString(),
-                });
+                }
+                const saveResult = saveMessage(sessionId, inputDict);
+                conversationHistory.push(inputDict);
                 if (saveResult) {
                   addLog("User message saved successfully", "success");
                 }
@@ -461,12 +463,14 @@ const AUDIO_CONFIG = {
                   `[saveMessage] Model Output: ${outputTranscript}`,
                   "info"
                 );
-                const saveResult = saveMessage(sessionId, {
+                const outputDict={
                   sender: "bot",
                   type: "model",
                   text: currentOutputTranscriptRef.current,
                   timestamp: new Date().toISOString(),
-                });
+                }
+                conversationHistory.push(outputDict);
+                const saveResult = saveMessage(sessionId, outputDict);
                 if (saveResult) {
                   addLog("Model message saved successfully", "success");
                 }
@@ -888,26 +892,47 @@ const AUDIO_CONFIG = {
     audioProcessorRef.current = null;
   };
 
-  const analyzeDistressScore = async (inputText) => {
+const analyzeDistressScore = async (inputText) => {
     if (!inputText || inputText.trim() === "") return;
-
     try {
-      addLog("Analyzing distress score...", "info");
-      const response = await fetch("http://localhost:8000/api/distress-score", {
+      console.log("[Distress] Sending text for distress score:", inputText); // Log input
+      const response = await fetch(`${GEMINI_BACKEND_URL}/api/distress-score`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: inputText }),
+        body: JSON.stringify({ text: inputText, conversationHistory:messages }),
       });
-
       if (!response.ok) throw new Error("API error");
-
       const data = await response.json();
-      setDistress(data.score);
-      recordingDistressRef.current = data.score;
+      setDistressScore(data.score);
+      if (data.score >= 7) {
+        notification.warning({
+          message: 'You may need support',
+          description: (
+            <div>
+              <div>Your distress score is high. Consider reaching out for help:</div>
+              <ul style={{ margin: '8px 0 0 0', padding: 0, listStyle: 'none' }}>
+                <li><Link to="/helpline">Helpline Resources</Link></li>
+                <li><Link to="/therapists">Book a Therapist</Link></li>
+                <li><Link to="/relaxationtools">Relaxation Tools</Link></li>
+              </ul>
+            </div>
+          ),
+          placement: 'topRight',
+          duration: 0,
+          style: { width: 340 },
+        });
+      }
+      // Log distress score and emotion immediately after update
+      setTimeout(() => {
+        console.log("[Distress] API response:", data); // Log full API response
+        console.log("[Distress] Distress score for message:", data.score);
+        console.log("[Distress] Emotion for message:", emotion.current);
+      }, 0);
     } catch (err) {
-      addLog("Distress score analysis failed", "error");
+      console.error("[Distress] Distress score analysis failed", err);
     }
   };
+
 
   const handleUserInteraction = async () => {
     if (
