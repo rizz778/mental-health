@@ -117,7 +117,8 @@ async def websocket_endpoint(
     websocket: WebSocket,
     gemini_service: GeminiService = Depends(get_gemini_service),
     emotion_service: EmotionService = Depends(get_emotion_service)
-):
+):  
+    import time
     active_sessions = {}
     await websocket.accept()
     client_id = f"client_{id(websocket)}"
@@ -200,7 +201,8 @@ async def websocket_endpoint(
             if "clientContent" in data:
                 user_turns = data["clientContent"].get("turns", [])
                 turn_complete = data["clientContent"].get("turnComplete", True)
-                # NEW: Update latest emotion from payload if present
+
+                # Only use emotion if recently detected from a frame
                 emotion_from_client = data["clientContent"].get("emotion")
                 if emotion_from_client:
                     client_emotions[client_id] = emotion_from_client
@@ -214,6 +216,9 @@ async def websocket_endpoint(
                             {"text": f"My current emotion is {latest_emotion}."}
                         ]
                     }
+
+
+                if emotion_context:
                     user_turns = user_turns + [emotion_context]
 
                 if user_turns and all(is_valid_turn(turn) for turn in user_turns):
@@ -242,13 +247,37 @@ async def websocket_endpoint(
             elif "frame" in data:
                 try:
                     frame_b64 = data["frame"]
-                    np_arr = np.frombuffer(base64.b64decode(frame_b64), np.uint8)
+                    logger.info(f"[Emotion] Received frame base64 length: {len(frame_b64)}")
+                    # Decode base64 to bytes
+                    img_bytes = base64.b64decode(frame_b64)
+                    logger.info(f"[Emotion] Decoded image bytes length: {len(img_bytes)}")
+                    # Convert bytes to numpy array
+                    with open("debug_frame.png", "wb") as f:
+                        f.write(img_bytes)
+
+                    np_arr = np.frombuffer(img_bytes, np.uint8)
+                    logger.info(f"[Emotion] Numpy array shape: {np_arr.shape}, dtype: {np_arr.dtype}")
+                    # Decode image (PNG)
                     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    if frame is None:
+                        logger.error("[Emotion] Failed to decode frame (cv2.imdecode returned None)")
+                        await websocket.send_json({"error": "Invalid frame"})
+                        continue
+                    logger.info(f"[Emotion] Frame shape: {frame.shape}, dtype: {frame.dtype}, mean: {frame.mean()}")
+                    if frame.mean() < 5.0:
+                        logger.warning("[Emotion] Received a completely black frame. Skipping emotion analysis.")
+                        await websocket.send_json({"error": "Black frame received"})
+                        continue
+
                     current_emotion = emotion_service.analyze_frame(frame)
                     aggregated = emotion_service.get_aggregated_emotion()
 
-                    # Store latest emotion for this client
-                    client_emotions[client_id] = current_emotion
+                    # Store latest emotion and timestamp for this client
+                    client_emotions[client_id] = {
+                        "current": current_emotion,
+                        "aggregated": aggregated,
+                        "timestamp": time.time()
+                    }
 
                     logger.info(f"[Emotion] Captured: current={current_emotion}, aggregated={aggregated}")
                     await websocket.send_json({
@@ -258,7 +287,9 @@ async def websocket_endpoint(
                         }
                     })
                 except Exception as e:
+                    logger.exception("[Emotion] Exception during frame processing")
                     await websocket.send_json({"error": "Emotion processing failed"})
+
 
             else:
                 await websocket.send_json({"error": "Unsupported message format"})
@@ -295,9 +326,11 @@ async def websocket_endpoint(
 
 
 audio_manager = AudioConnectionManager()
+audio_client_emotions = {}  # Store latest emotion per audio client
 
 @router.websocket("/audio")
 async def audio_websocket_endpoint(websocket: WebSocket):
+    client_id = f"audio_client_{id(websocket)}"
     try:
         await audio_manager.connect(websocket)
         user_profile = None
@@ -326,11 +359,10 @@ async def audio_websocket_endpoint(websocket: WebSocket):
                         f"[{msg.get('sender','')}: {msg.get('text','')} ]" for msg in last_msgs
                     )
                     system_instruction += history_str
-               
                 # Start Gemini session
                 gemini_client = audio_manager.active_connections.get(websocket)
                 if gemini_client:
-                    await gemini_client.send_setup(config,system_instruction)
+                    await gemini_client.send_setup(config, system_instruction)
                 await websocket.send_json({"type": "setup_complete"})
 
             elif message.get("type") == "audio_input":
@@ -344,6 +376,11 @@ async def audio_websocket_endpoint(websocket: WebSocket):
 
             elif message.get("type") == "text_input":
                 text = message.get("text", "")
+                # Add emotion context if available, similar to "/" endpoint
+                latest_emotion = audio_client_emotions.get(client_id)
+                if latest_emotion:
+                    emotion_context = f"My current emotion is {latest_emotion}. "
+                    text = f"{emotion_context}{text}"
                 if text:
                     gemini_client = audio_manager.active_connections.get(websocket)
                     if gemini_client:
@@ -351,3 +388,6 @@ async def audio_websocket_endpoint(websocket: WebSocket):
 
     except Exception:
         await audio_manager.disconnect(websocket)
+    finally:
+        if client_id in audio_client_emotions:
+            del audio_client_emotions[client_id]

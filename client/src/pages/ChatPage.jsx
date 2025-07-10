@@ -141,30 +141,62 @@ const ChatPage = () => {
       .getUserMedia({ video: true })
       .then((mediaStream) => {
         stream = mediaStream;
-        if (videoRef.current) {
+        if (videoRef.current && canvasRef.current) {
           videoRef.current.srcObject = mediaStream;
+          videoRef.current.onloadedmetadata = () => {
+            canvasRef.current.width = videoRef.current.videoWidth;
+            canvasRef.current.height = videoRef.current.videoHeight;
+            // Ensure video is playing
+            videoRef.current.play().catch((err) => {
+              console.warn("Video play() failed:", err);
+            });
+            const ctx = canvasRef.current.getContext("2d");
+            ctx.drawImage(
+              videoRef.current,
+              0,
+              0,
+              canvasRef.current.width,
+              canvasRef.current.height
+            );
+          };
         }
         interval = setInterval(() => {
-          if (!ws || ws.readyState !== WebSocket.OPEN) {
-            console.log("WebSocket not open");
-            return;
-          }
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
           const canvas = canvasRef.current;
           const video = videoRef.current;
-          if (!canvas) {
-            console.log("Canvas not available");
+
+          if (video.paused || video.ended) {
+            console.warn("Video is not playing");
             return;
           }
-          if (!video) {
-            console.log("Video not available");
-            return;
-          }
-          if (canvas && video) {
+
+          if (!canvas || !video) return;
+          if (video.readyState === 4) {
+            // HAVE_ENOUGH_DATA
             const ctx = canvas.getContext("2d");
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataURL = canvas.toDataURL("image/jpeg");
+            const imageData = ctx.getImageData(
+              0,
+              0,
+              canvas.width,
+              canvas.height
+            );
+            const data = imageData.data;
+            const mean = data.reduce((sum, val) => sum + val, 0) / data.length;
+            console.log("Frame mean (frontend):", mean);
+            if (mean < 5) {
+              // Don't send blank frames
+              console.warn("Not sending blank frame");
+              return;
+            }
+            const dataURL = canvas.toDataURL("image/png");
             const base64 = dataURL.split(",")[1];
-            // console.log("Frame sent")
+
+            // const a = document.createElement("a");
+            // a.href = dataURL;
+            // a.download = "debug_canvas.png";
+            // a.click();
+
             ws.send(JSON.stringify({ frame: base64 }));
           }
         }, 1000);

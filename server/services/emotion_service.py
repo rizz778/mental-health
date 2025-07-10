@@ -13,7 +13,9 @@ class EmotionService:
 
     def analyze_frame(self, frame: np.ndarray) -> str:
         try:
-            result = DeepFace.analyze(frame, actions=["emotion"], enforce_detection=False)
+            result = DeepFace.analyze(frame, actions=["emotion"], 
+            enforce_detection=False)
+            logger.info(f"[Emotion] DeepFace result: {result}")
             # Handle both dict and list return types
             if isinstance(result, dict):
                 emotion = result.get("dominant_emotion", "unknown")

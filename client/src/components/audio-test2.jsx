@@ -8,7 +8,7 @@ const GeminiAudioChatModal = ({
   userProfile,
   conversationHistory,
   sessionId,
-  onAudioChatClose
+  onAudioChatClose,
 }) => {
   const [isCalling, setIsCalling] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -56,16 +56,16 @@ const GeminiAudioChatModal = ({
   const currentOutputTranscriptRef = useRef("");
   const NODE_BACKEND_URL = "http://localhost:4000";
   // Audio configuration
-// Increase buffer sizes for smoother playback
-const AUDIO_CONFIG = {
-  sampleRate: 24000,
-  bufferSize: 12288,
-  minBufferChunks: 10,
-  maxBufferChunks: 25,
-  crossfadeDuration: 0.01,
-  lookAheadTime: 0.02,
-  targetLatency: 0.02,
-};
+  // Increase buffer sizes for smoother playback
+  const AUDIO_CONFIG = {
+    sampleRate: 24000,
+    bufferSize: 12288,
+    minBufferChunks: 10,
+    maxBufferChunks: 25,
+    crossfadeDuration: 0.01,
+    lookAheadTime: 0.02,
+    targetLatency: 0.02,
+  };
   const addLog = useCallback((message, type = "info") => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs((prev) => [...prev.slice(-50), { timestamp, message, type }]);
@@ -428,14 +428,16 @@ const AUDIO_CONFIG = {
 
             case "turnComplete":
               console.log("Turn   Completed");
-              const currentEmotion = emotion.aggregated;
+              const currentEmotion = emotionDetectionEnabled
+                ? emotion.aggregated || ""
+                : "";
               const currentDistress = distress;
               if (currentInputTranscriptRef.current) {
                 setInputTranscript(currentInputTranscriptRef.current);
                 analyzeDistressScore(currentInputTranscriptRef.current);
                 const savedEmotion = recordingEmotionRef.current;
                 const savedDistress = recordingDistressRef.current;
-                console.log(savedEmotion)
+                console.log(savedEmotion);
                 // Log emotion and distress before saving
                 console.log("[saveMessage] User Emotion:", currentEmotion);
                 console.log("[saveMessage] User Distress:", currentDistress);
@@ -445,8 +447,8 @@ const AUDIO_CONFIG = {
                   sender: "user",
                   type: "user",
                   text: currentInputTranscriptRef.current,
-                  emotion: savedEmotion,
-                  distressScore: savedDistress,
+                  emotion: currentEmotion,
+                  distressScore: currentDistress,
                   timestamp: new Date().toISOString(),
                 }
                 const saveResult = saveMessage(sessionId, inputDict);
