@@ -394,6 +394,7 @@ const GeminiAudioChatModal = ({
                 user_profile: userProfile,
                 conversation_history: conversationHistory,
               },
+              // VAD config removed: let Gemini handle VAD with defaults
             },
           })
         );
@@ -434,6 +435,9 @@ const GeminiAudioChatModal = ({
               if (currentInputTranscriptRef.current) {
                 setInputTranscript(currentInputTranscriptRef.current);
                 analyzeDistressScore(currentInputTranscriptRef.current);
+                const savedEmotion = recordingEmotionRef.current;
+                const savedDistress = recordingDistressRef.current;
+                console.log(savedEmotion);
                 // Log emotion and distress before saving
                 console.log("[saveMessage] User Emotion:", currentEmotion);
                 console.log("[saveMessage] User Distress:", currentDistress);
@@ -956,145 +960,6 @@ const GeminiAudioChatModal = ({
       clearAudioQueue();
     };
   }, []);
-  const handleClose = () => {
-    // Disconnect Gemini audio session and clean up resources
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (isRecording) {
-      stopRecording();
-    }
-    clearAudioQueue();
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-      audioContextReadyRef.current = false;
-    }
-    if (onClose) onClose();
-    if (onAudioChatClose) onAudioChatClose(sessionId);
-  };
-  useEffect(() => {
-    let audioCtx, source, processor, stream;
-    let isSpeech = false;
-    let silenceFrames = 0;
-    let speechChunks = [];
-    let speechStartTime = null;
-    let debounceTimeout = null;
-    let listening = true;
-    const SILENCE_THRESHOLD = 0.008;
-    const SILENCE_FRAMES_TO_STOP = 12;
-    const MIN_SPEECH_DURATION_MS = 400;
-    const DEBOUNCE_AFTER_SEND_MS = 350;
-
-    const handleVADProcess = (event) => {
-      if (!listening) return;
-      const input = event.inputBuffer.getChannelData(0);
-      const energy = Math.sqrt(
-        input.reduce((a, b) => a + b * b, 0) / input.length
-      );
-      if (energy > SILENCE_THRESHOLD) {
-        if (!isSpeech) {
-          isSpeech = true;
-          speechChunks = [];
-          speechStartTime = Date.now();
-        }
-        speechChunks.push(new Float32Array(input));
-        silenceFrames = 0;
-      } else if (isSpeech) {
-        silenceFrames++;
-        speechChunks.push(new Float32Array(input));
-        if (silenceFrames > SILENCE_FRAMES_TO_STOP) {
-          isSpeech = false;
-          silenceFrames = 0;
-          const speechDuration = Date.now() - (speechStartTime || Date.now());
-          if (speechDuration >= MIN_SPEECH_DURATION_MS) {
-            sendSpeech(speechChunks);
-          } else {
-            addLog(
-              `Speech too short (${speechDuration}ms), not sending`,
-              "info"
-            );
-          }
-          speechChunks = [];
-          listening = false;
-          debounceTimeout = setTimeout(() => {
-            listening = true;
-          }, DEBOUNCE_AFTER_SEND_MS);
-        }
-      }
-    };
-
-    const startVAD = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            sampleRate: 16000,
-            channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: 16000,
-        });
-        source = audioCtx.createMediaStreamSource(stream);
-        processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        processor.onaudioprocess = handleVADProcess;
-        source.connect(processor);
-        processor.connect(audioCtx.destination);
-      } catch (err) {
-        addLog("VAD error: " + err.message, "error");
-      }
-    };
-
-    const sendSpeech = async (chunks) => {
-      if (!chunks.length) return;
-      let totalSamples = chunks.reduce((sum, arr) => sum + arr.length, 0);
-      const combinedPCM = new Float32Array(totalSamples);
-      let offset = 0;
-      chunks.forEach((chunk) => {
-        combinedPCM.set(chunk, offset);
-        offset += chunk.length;
-      });
-      const userPCM16 = convertTo16BitPCM(combinedPCM);
-      const base64Data = convertPCMToBase64(userPCM16);
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const message = {
-          type: "audio_input",
-          audio_data: base64Data,
-          emotion: emotionDetectionEnabled ? emotion.aggregated || "" : "",
-          format: "pcm",
-          sample_rate: 16000,
-          channels: 1,
-          bits_per_sample: 16,
-        };
-        wsRef.current.send(JSON.stringify(message));
-        addLog(
-          `Auto audio sent (${(combinedPCM.length / 16000).toFixed(
-            2
-          )}s) with emotion: ${
-            emotionDetectionEnabled ? emotion.aggregated || "none" : "none"
-          }`,
-          "user-input"
-        );
-      }
-    };
-
-    if (connectionStatus === "connected") {
-      startVAD();
-    }
-
-    return () => {
-      if (debounceTimeout) clearTimeout(debounceTimeout);
-      if (processor) processor.disconnect();
-      if (source) source.disconnect();
-      if (audioCtx) audioCtx.close();
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-    };
-  }, [connectionStatus]);
-  // Re-initiate Gemini audio session when modal is opened
   useEffect(() => {
     if (visible) {
       // Reset connection state and logs
@@ -1114,11 +979,29 @@ const GeminiAudioChatModal = ({
       currentOutputTranscriptRef.current = "";
       // Optionally, re-initialize audio context if needed
       initializeAudioContext();
-      // Optionally, auto-connect to backend if desired
-      // connectToBackend();
+      // Connect to backend when modal opens
+      connectToBackend();
     }
     // No cleanup needed here; handled by other effects
   }, [visible]);
+  const handleClose = () => {
+    // Disconnect Gemini audio session and clean up resources
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (isRecording) {
+      stopRecording();
+    }
+    clearAudioQueue();
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+      audioContextReadyRef.current = false;
+    }
+    if (onClose) onClose();
+    if (onAudioChatClose) onAudioChatClose(sessionId);
+  };
   return (
     <Modal
       title="Gemini Audio Chat"
@@ -1132,34 +1015,6 @@ const GeminiAudioChatModal = ({
         >
           Close
         </Button>,
-        <Button
-          key="start"
-          type="primary"
-          onClick={connectToBackend}
-          disabled={isCalling || connectionStatus === "connected"}
-        >
-          {isCalling
-            ? "Connecting..."
-            : connectionStatus === "connected"
-            ? "Connected"
-            : "Start Audio Call"}
-        </Button>,
-        // <Button
-        //   key="record"
-        //   type="primary"
-        //   onClick={startRecording}
-        //   disabled={isRecording || connectionStatus !== "connected"}
-        // >
-        //   Start Recording
-        // </Button>,
-        // <Button
-        //   key="stop"
-        //   danger
-        //   onClick={stopRecording}
-        //   disabled={!isRecording}
-        // >
-        //   Stop Recording
-        // </Button>,
         <Button
           key="emotion"
           onClick={() => setEmotionDetectionEnabled((v) => !v)}
@@ -1182,6 +1037,17 @@ const GeminiAudioChatModal = ({
             style={{ marginTop: 10 }}
           />
         )}
+        <div style={{ margin: "16px 0" }}>
+          <Button
+            type={isRecording ? "primary" : "default"}
+            icon={isRecording ? <MicOff /> : <Mic />}
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={connectionStatus !== "connected"}
+            style={{ marginRight: 8 }}
+          >
+            {isRecording ? "Stop" : "Start"} Recording
+          </Button>
+        </div>
         {/* Display finalized transcripts in a styled box */}
         {(inputTranscript || outputTranscript) && (
           <div

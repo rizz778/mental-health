@@ -367,15 +367,12 @@ async def audio_websocket_endpoint(websocket: WebSocket):
 
             elif message.get("type") == "audio_input":
                 audio_data = message.get("audio_data", "")
-                emotion = message.get("emotion", "")
-                if emotion:
-                    audio_client_emotions[client_id] = emotion  # Save latest emotion for this client
+                # If the message has an explicit end_of_stream flag, use it; otherwise, always send True for now
+                end_of_stream = message.get("end_of_stream", True)
                 if audio_data:
                     gemini_client = audio_manager.active_connections.get(websocket)
                     if gemini_client:
-                        await gemini_client.send_audio(audio_data)
-                # Optionally acknowledge emotion receipt
-                # await websocket.send_json({"emotion_received": emotion})
+                        await gemini_client.send_audio(audio_data, end_of_stream=end_of_stream)
 
             elif message.get("type") == "text_input":
                 text = message.get("text", "")
