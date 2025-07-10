@@ -6,3 +6,4 @@ services/audio_service.py
 api/ws/audio_router.py
 __pycache__/
 mental-sys-b82435771303.json
+debug_frame.png

@@ -27,7 +27,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import GeminiAudioChatModal from "../components/audio-test2";
 const { Header, Sider, Content } = Layout;
-
+import { Link } from "react-router-dom";
 // Backend URLs
 const NODE_BACKEND_URL = "http://localhost:4000"; // Node.js backend (user profile, chat history, saving results)
 const GEMINI_BACKEND_URL = "http://localhost:8000"; // Gemini backend (chat, emotion, distress scoring)
@@ -611,11 +611,20 @@ const ChatPage = () => {
   const analyzeDistressScore = async (inputText) => {
     if (!inputText || inputText.trim() === "") return;
     try {
+      // Format conversationHistory to match backend schema
+      const formattedHistory = (messages || []).map((msg) => ({
+        sender: msg.sender || '',
+        type: msg.type || '',
+        text: msg.text || msg.content || '',
+        timestamp: msg.timestamp || null,
+        emotion: msg.emotion || null,
+        distress: msg.distress || null,
+      }));
       console.log("[Distress] Sending text for distress score:", inputText); // Log input
       const response = await fetch(`${GEMINI_BACKEND_URL}/api/distress-score`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: inputText, conversationHistory:messages }),
+        body: JSON.stringify({ text: inputText, conversationHistory: formattedHistory }),
       });
       if (!response.ok) throw new Error("API error");
       const data = await response.json();
@@ -627,9 +636,9 @@ const ChatPage = () => {
             <div>
               <div>Your distress score is high. Consider reaching out for help:</div>
               <ul style={{ margin: '8px 0 0 0', padding: 0, listStyle: 'none' }}>
-                <li><Link to="/helpline">Helpline Resources</Link></li>
-                <li><Link to="/therapists">Book a Therapist</Link></li>
-                <li><Link to="/relaxationtools">Relaxation Tools</Link></li>
+                <li><a href="/helpline">Helpline Resources</a></li>
+                <li><a href="/therapists">Book a Therapist</a></li>
+                <li><a href="/relaxationtools">Relaxation Tools</a></li>
               </ul>
             </div>
           ),
@@ -638,7 +647,6 @@ const ChatPage = () => {
           style: { width: 340 },
         });
       }
-      // Log distress score and emotion immediately after update
       setTimeout(() => {
         console.log("[Distress] API response:", data); // Log full API response
         console.log("[Distress] Distress score for message:", data.score);
@@ -911,7 +919,7 @@ const ChatPage = () => {
         });
       }
     }
-  }, [messages, activeSession, emotion.current, distressScore]);
+  }, [messages, activeSession, distressScore]);
 
   // Emotion detection settings modal
   const handleConfigSubmit = (values) => {

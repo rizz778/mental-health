@@ -209,6 +209,7 @@ async def websocket_endpoint(
 
                 latest_emotion = client_emotions.get(client_id)
                 print(f"[DEBUG] Latest emotion for {client_id}: {latest_emotion}")
+                emotion_context = None  # Ensure variable is always defined
                 if latest_emotion:
                     emotion_context = {
                         "role": "user",
