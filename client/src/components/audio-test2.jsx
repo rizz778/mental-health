@@ -8,7 +8,7 @@ const GeminiAudioChatModal = ({
   userProfile,
   conversationHistory,
   sessionId,
-  onAudioChatClose
+  onAudioChatClose,
 }) => {
   const [isCalling, setIsCalling] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -56,16 +56,16 @@ const GeminiAudioChatModal = ({
   const currentOutputTranscriptRef = useRef("");
   const NODE_BACKEND_URL = "http://localhost:4000";
   // Audio configuration
-// Increase buffer sizes for smoother playback
-const AUDIO_CONFIG = {
-  sampleRate: 24000,
-  bufferSize: 12288,
-  minBufferChunks: 10,
-  maxBufferChunks: 25,
-  crossfadeDuration: 0.01,
-  lookAheadTime: 0.02,
-  targetLatency: 0.02,
-};
+  // Increase buffer sizes for smoother playback
+  const AUDIO_CONFIG = {
+    sampleRate: 24000,
+    bufferSize: 12288,
+    minBufferChunks: 10,
+    maxBufferChunks: 25,
+    crossfadeDuration: 0.01,
+    lookAheadTime: 0.02,
+    targetLatency: 0.02,
+  };
   const addLog = useCallback((message, type = "info") => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs((prev) => [...prev.slice(-50), { timestamp, message, type }]);
@@ -427,24 +427,27 @@ const AUDIO_CONFIG = {
 
             case "turnComplete":
               console.log("Turn   Completed");
-              const currentEmotion = emotion.aggregated;
+              const currentEmotion = emotionDetectionEnabled
+                ? emotion.aggregated || ""
+                : "";
               const currentDistress = distress;
               if (currentInputTranscriptRef.current) {
                 setInputTranscript(currentInputTranscriptRef.current);
                 analyzeDistressScore(currentInputTranscriptRef.current);
-                const savedEmotion = recordingEmotionRef.current;
-                const savedDistress = recordingDistressRef.current;
                 // Log emotion and distress before saving
                 console.log("[saveMessage] User Emotion:", currentEmotion);
                 console.log("[saveMessage] User Distress:", currentDistress);
-                addLog(`[saveMessage] User Emotion: ${savedEmotion}`, "info");
-                addLog(`[saveMessage] User Distress: ${savedDistress}`, "info");
+                addLog(`[saveMessage] User Emotion: ${currentEmotion}`, "info");
+                addLog(
+                  `[saveMessage] User Distress: ${currentDistress}`,
+                  "info"
+                );
                 const saveResult = saveMessage(sessionId, {
                   sender: "user",
                   type: "user",
                   text: currentInputTranscriptRef.current,
-                  emotion: savedEmotion,
-                  distressScore: savedDistress,
+                  emotion: currentEmotion,
+                  distressScore: currentDistress,
                   timestamp: new Date().toISOString(),
                 });
                 if (saveResult) {
@@ -987,7 +990,9 @@ const AUDIO_CONFIG = {
     const handleVADProcess = (event) => {
       if (!listening) return;
       const input = event.inputBuffer.getChannelData(0);
-      const energy = Math.sqrt(input.reduce((a, b) => a + b * b, 0) / input.length);
+      const energy = Math.sqrt(
+        input.reduce((a, b) => a + b * b, 0) / input.length
+      );
       if (energy > SILENCE_THRESHOLD) {
         if (!isSpeech) {
           isSpeech = true;
@@ -1006,7 +1011,10 @@ const AUDIO_CONFIG = {
           if (speechDuration >= MIN_SPEECH_DURATION_MS) {
             sendSpeech(speechChunks);
           } else {
-            addLog(`Speech too short (${speechDuration}ms), not sending`, "info");
+            addLog(
+              `Speech too short (${speechDuration}ms), not sending`,
+              "info"
+            );
           }
           speechChunks = [];
           listening = false;
@@ -1056,6 +1064,7 @@ const AUDIO_CONFIG = {
         const message = {
           type: "audio_input",
           audio_data: base64Data,
+          emotion: emotionDetectionEnabled ? emotion.aggregated || "" : "",
           format: "pcm",
           sample_rate: 16000,
           channels: 1,
@@ -1063,7 +1072,11 @@ const AUDIO_CONFIG = {
         };
         wsRef.current.send(JSON.stringify(message));
         addLog(
-          `Auto audio sent (${(combinedPCM.length / 16000).toFixed(2)}s)`,
+          `Auto audio sent (${(combinedPCM.length / 16000).toFixed(
+            2
+          )}s) with emotion: ${
+            emotionDetectionEnabled ? emotion.aggregated || "none" : "none"
+          }`,
           "user-input"
         );
       }
@@ -1082,30 +1095,30 @@ const AUDIO_CONFIG = {
     };
   }, [connectionStatus]);
   // Re-initiate Gemini audio session when modal is opened
-useEffect(() => {
-  if (visible) {
-    // Reset connection state and logs
-    setIsCalling(false);
-    setIsConnected(false);
-    setIsRecording(false);
-    setIsMuted(false);
-    setConnectionStatus("disconnected");
-    setLogs([]);
-    setAudioQueueLength(0);
-    setIsPlaying(false);
-    setInputTranscript("");
-    setOutputTranscript("");
-    setDistress(0);
-    setLog("");
-    currentInputTranscriptRef.current = "";
-    currentOutputTranscriptRef.current = "";
-    // Optionally, re-initialize audio context if needed
-    initializeAudioContext();
-    // Optionally, auto-connect to backend if desired
-    // connectToBackend();
-  }
-  // No cleanup needed here; handled by other effects
-}, [visible]);
+  useEffect(() => {
+    if (visible) {
+      // Reset connection state and logs
+      setIsCalling(false);
+      setIsConnected(false);
+      setIsRecording(false);
+      setIsMuted(false);
+      setConnectionStatus("disconnected");
+      setLogs([]);
+      setAudioQueueLength(0);
+      setIsPlaying(false);
+      setInputTranscript("");
+      setOutputTranscript("");
+      setDistress(0);
+      setLog("");
+      currentInputTranscriptRef.current = "";
+      currentOutputTranscriptRef.current = "";
+      // Optionally, re-initialize audio context if needed
+      initializeAudioContext();
+      // Optionally, auto-connect to backend if desired
+      // connectToBackend();
+    }
+    // No cleanup needed here; handled by other effects
+  }, [visible]);
   return (
     <Modal
       title="Gemini Audio Chat"
