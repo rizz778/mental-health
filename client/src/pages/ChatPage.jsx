@@ -78,7 +78,7 @@ const ChatPage = () => {
   // Config
   const [systemInstruction, setSystemInstruction] = useState(
     // "You are a helpful assistant. The user's profile and recent conversation are provided. Use the user's name and any relevant profile information in your responses. If the user asks for their name, use the name from the profile. Be supportive and empathetic.Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
-    "You are a helpful assistant. The user's profile and recent conversation are provided. Use the user's name and any relevant profile information in your responses. If the user asks for their name, use the name from the profile. Be supportive and empathetic."
+    "You are a helpful assistant. The user's profile and recent conversation are provided. Use the user's name and any relevant profile information in your responses. If the user asks for their name, use the name from the profile. Be supportive and empathetic.Whenever you receive a user's current emotion, always acknowledge it explicitly in your reply, mention the emotion, and respond with empathy and support tailored to that emotion. Never ignore the user's emotion."
   );
   const [wsUrl, setWsUrl] = useState("ws://localhost:8000");
   const [profileLoading, setProfileLoading] = useState(true);
@@ -281,7 +281,12 @@ const ChatPage = () => {
     }
 
     // Defensive: If Gemini returns an unsupported format, log to console but do not show UI error
-    if (!data.type && !data.serverContent && !data.text_chunk && !data.generation_complete) {
+    if (
+      !data.type &&
+      !data.serverContent &&
+      !data.text_chunk &&
+      !data.generation_complete
+    ) {
       console.warn("Received unsupported message format:", data);
       return;
     }
@@ -394,7 +399,10 @@ const ChatPage = () => {
         setCurrentResponse("");
         currentResponseRef.current = "";
         // Do not show error in UI for Gemini errors; just log
-        console.error("[Gemini] Error message:", data.message || "An error occurred");
+        console.error(
+          "[Gemini] Error message:",
+          data.message || "An error occurred"
+        );
         break;
       case "session_resumption_update":
         if (data.handle) {
@@ -433,7 +441,7 @@ const ChatPage = () => {
 
   const showError = (message) => {
     setErrorMessage(message);
-  
+
     console.error("[Client] Error:", message);
   };
 
@@ -668,7 +676,7 @@ const ChatPage = () => {
       }
     }
   };
-const handleAudioChatClose = async (sessionId) => {
+  const handleAudioChatClose = async (sessionId) => {
     if (!sessionId) return;
     await fetchMessages(sessionId); // Refresh messages from backend
     // Re-initiate Gemini session with updated conversation history
@@ -736,8 +744,12 @@ const handleAudioChatClose = async (sessionId) => {
       if (data.messages) {
         // Sort messages by timestamp (or fallback to _id if timestamp missing)
         const sortedMessages = [...data.messages].sort((a, b) => {
-          const aTime = a.timestamp ? new Date(a.timestamp).getTime() : (a._id || 0);
-          const bTime = b.timestamp ? new Date(b.timestamp).getTime() : (b._id || 0);
+          const aTime = a.timestamp
+            ? new Date(a.timestamp).getTime()
+            : a._id || 0;
+          const bTime = b.timestamp
+            ? new Date(b.timestamp).getTime()
+            : b._id || 0;
           return aTime - bTime;
         });
         const formattedMessages = sortedMessages.map((msg, idx) => {
