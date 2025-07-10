@@ -26,7 +26,7 @@ def get_access_token():
 
 class GeminiAudioService:
     def __init__(self):
-        self.api_key = 'ya29.c.c0ASRK0GadAAgeBWKviFs9RUAU0nct4nL5TiWHFyHCjVfrAmcyPl-GDnFADVDxUwyulrVdm4hc_8SzA3SUuYLl6YJr51VSqIg5y3AubrIx_aA25EMx29MGvLGXjgEYNiKq9u2r8LA-xtd1qXP1Xh368KRniRDEgR3OgoRchHsSrRSz1FC5Txsj6w7FMZufEPXWHsoDoA7upMeIhrV8YvmTPpq4Qvbqt8qkqVpHRqxj6QylLY1AVl3qWCpelagEPv5QN9DAPYK0J21aDG4BdbjSlw1ZgAljWIgGYdi0d0wQWWRaKAm-qHU4EalGYRCS9XB_QZL8ZHkf8Jq391p8B0Sj-GSwym8qszFrC6JfKGy6-c9KvOMb2MISG9rBcMoG388P0qYu0XIvxlyJsSQYFtlQifrR7xOsWhdqFnhjY4wqdYUY9e-mocZeh_MQrnJF5e1xMw7aIkwjuX2WWraIx8wu0mazXa4_sk1vIe-iIbWkYcIIRW5Y9yMbveBUOZnirYrIr4MRvaszlufd3p6fSUxrIVz2jlQpcj5yfI2aqr_0Inl6q0RU7V1RJt66t1ZnsodV09Zkg_8p9B391Rnw5Y3f4fgiROzlza2M1QnRFY4VpxRjVBZrx2Oy7WUzfn9x24Ig85Iz5tYqXB0r4Je6YZMRrB-yUUygvQhmjg_obex7Fcqe6vBmow-u-74yX0VecoaycVZVv3l920U13xvwx1vJd43sfXhZ7V-mZQlmh258W7pm397I9Xxon7pmsfB6f-3OsXik532qxWsn6ohhe41UYOj45l6quZrev_ZlF9XtoS6iXs7v4IR7SsYh3U5a_aJuB2v40ky2ShklS0h4U9FSqJFyh5ng2qw_zlkQ4YJsJW6bmR0rw2-Yf7JUWoJjouv7oWq3jRI7QWc3ppBer969sxJWgU-ik6MV7y_Mi-a-25h3oM7qzFhB31ns-vtI9draxsw1-lRRQe3Uat-UmaSMSRaR-rmoz2V3kkYtvkluYb40r3It5j39jbm'
+        self.api_key = 'ya29.c.c0ASRK0GZWKAvCtamzsBDxG4gZw971dHRoui5k8XoeQOzH-0p34rUKeBH-FJRB2xrtwHbMFfFRa1WW2yQoNxzlv1eOqogkcSWGCUOj_PASPxW8JlbWBmlElP2b4_4uHZ9kpqgNAEKMBpqRukY4VMH4kiRcg0P1tzQwKmYMgUQeeZxgV-agN110_ptea0kqCXH4AVmBSH7KtQNFv9SoLjteGSHtnKTmEQcoa8aokLAJ3wCC6wbNSHj-CuPsISTpE9NAX2rMi5WSiGV6Vk2gVXiNeFHPjCv78frSJwpb4H7hQDlgiEktoeXHbWAdeCwz5YlOvrEwsQSQnw5c7Nq2xG7iXW6XRyS0J3LpoaOkTK4A9PPOZre98IJorSBJ1yvCH389A5cFWq_qbIl9-_ZlWzse6svaVVcaJ8Wg44UuYWos4s3wnVUSs7qVhdMoy396Ox-QgY0dJ_BIU6_6YaRQkm6rtXvncfcFR2yXzlQnRsxszg_MlZ8YcjQkXp5p5X8XJq3cQghjWdpnys20ezBcou4ORFnnifXIUY7XecXpoFRR7dbrBQZQ4qqjVZUUtMapuwSrWfkMzfk1FX6Yhis2W8IfbZy5cwI9g36Fcivo9lcne61vqZgMskRo8frpBj_QpeF1V35_io0rMxY2qxb91_t3_VWa9jJVcWBo9p5eh7Zu1vrxQUiJdl7RjM9Y45WptQW1zYarkI0Q2nIiFS4qyp1u5whFlRxWf_Qojv7olmBaqSoVXlB7UaQickhpZx9tlXeRel0yczVJ6Ow4Sv3RZrUkcX8qYeky1e47Bs0Fg3wBYp-lcaUnpzbMQ7acIFxVsoooe9V0Rs2aUfFygc99lVsycwh5Vnk3Yto86_IU8UWufb5jy42xp8Y9Yu5BOZm7la_V1vFi5fqsp-aS2petieSOVpebQMJ_iQ0codw7--U8-jdhBykSMnMt9I4ua-tSO1li-mIuVBBv1fShFq1FsBw74h3ioW4WQFzYZm0_0bhJfciqVFMspcbFwJj'
         self.websocket = None
         self.connected = False
         self.config = None
@@ -60,6 +60,7 @@ class GeminiAudioService:
                 },
                 "inputAudioTranscription": {},
                 "outputAudioTranscription": {},
+                # VAD config removed: let Gemini handle VAD with defaults
                 "systemInstruction": {
                     "parts": [{ "text": system_prompt }]
                 },
@@ -69,8 +70,8 @@ class GeminiAudioService:
         await self.websocket.send(json.dumps(setup_message))
         logger.info("[GeminiAudioService] Setup message sent.")
 
-    async def send_audio(self, audio_data: str):
-        """Send audio data to Gemini using realtime input"""
+    async def send_audio(self, audio_data: str, end_of_stream: bool = False):
+        """Send audio data to Gemini using realtime input. Optionally signal end of stream."""
         if not self.connected or not self.websocket:
             raise Exception("Not connected to Gemini Live API")
         print(f"🎵 Sending audio data to Gemini, size: {len(audio_data)} chars")
@@ -84,7 +85,9 @@ class GeminiAudioService:
                 ]
             }
         }
-        print(f"📤 Audio message structure: {json.dumps({k: v if k != 'data' else f'[{len(v)} chars]' for k, v in message['realtimeInput']['mediaChunks'][0].items()}, indent=2)}")
+        
+        msg_items = {k: (f'[{len(v)} chars]' if k == 'data' else v) for k, v in message['realtimeInput']['mediaChunks'][0].items()}
+        print(f"\U0001F4E4 Audio message structure: {msg_items}")
         await self.websocket.send(json.dumps(message))
         print("✅ Audio data sent successfully")
         logger.info("Sent audio data to Gemini")

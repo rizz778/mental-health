@@ -141,6 +141,14 @@ export const addMessage = async (req, res) => {
       return res.status(404).json({ message: "Chat session not found or unauthorized" });
     }
     
+    // Log the added message
+    console.log(`[Chat] Message added to session ${sessionId}:`, {
+      sender,
+      text: text.trim(),
+      emotion,
+      distressScore,
+      timestamp: messageData.timestamp
+    });
     // Return minimal response
     return res.status(201).json({ 
       message: "Message added successfully",
