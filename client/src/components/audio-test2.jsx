@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff } from "lucide-react";
-import { Modal, Button, Alert } from "antd";
+import { Modal, Button, Alert ,notification} from "antd";
 
 const GeminiAudioChatModal = ({
   visible,
@@ -25,7 +25,7 @@ const GeminiAudioChatModal = ({
   const [outputTranscript, setOutputTranscript] = useState("");
   const [distress, setDistress] = useState(0);
   const [log, setLog] = useState("");
-
+  
   // Refs for audio management
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -389,7 +389,7 @@ const GeminiAudioChatModal = ({
             config: {
               model: "models/gemini-2.5-flash-preview-native-audio-dialog",
               response_modalities: ["AUDIO"],
-              voice_name: "Puck",
+              voice_name: "Charon",
               systemContext: {
                 user_profile: userProfile,
                 conversation_history: conversationHistory,
@@ -428,57 +428,60 @@ const GeminiAudioChatModal = ({
 
             case "turnComplete":
               console.log("Turn   Completed");
-              const currentEmotion = emotionDetectionEnabled
-                ? emotion.aggregated || ""
-                : "";
-              const currentDistress = distress;
-              if (currentInputTranscriptRef.current) {
-                setInputTranscript(currentInputTranscriptRef.current);
-                analyzeDistressScore(currentInputTranscriptRef.current);
-                const savedEmotion = recordingEmotionRef.current;
-                const savedDistress = recordingDistressRef.current;
-                console.log(savedEmotion);
-                // Log emotion and distress before saving
-                console.log("[saveMessage] User Emotion:", currentEmotion);
-                console.log("[saveMessage] User Distress:", currentDistress);
-                addLog(`[saveMessage] User Emotion: ${savedEmotion}`, "info");
-                addLog(`[saveMessage] User Distress: ${savedDistress}`, "info");
-                const inputDict={
-                  sender: "user",
-                  type: "user",
-                  text: currentInputTranscriptRef.current,
-                  emotion: currentEmotion,
-                  distressScore: currentDistress,
-                  timestamp: new Date().toISOString(),
+              const currentEmotion = emotionDetectionEnabled ? emotion.aggregated || "" : "";
+              (async () => {
+                if (currentInputTranscriptRef.current) {
+                  setInputTranscript(currentInputTranscriptRef.current);
+                  // Await distress score before saving message
+                  const distressScore = await analyzeDistressScore(currentInputTranscriptRef.current);
+                  const savedEmotion = recordingEmotionRef.current;
+                  console.log(savedEmotion);
+                  // Log emotion and distress before saving
+                  console.log("[saveMessage] User Emotion:", savedEmotion);
+                  console.log("[saveMessage] User Distress:", distressScore);
+                  addLog(`[saveMessage] User Emotion: ${savedEmotion}` , "info");
+                  addLog(`[saveMessage] User Distress: ${distressScore}` , "info");
+                  const inputDict={
+                    sender: "user",
+                    type: "user",
+                    text: currentInputTranscriptRef.current,
+                    emotion: savedEmotion,
+                    distressScore: distressScore,
+                    timestamp: new Date().toISOString(),
+                  };
+                  const saveResult = await saveMessage(sessionId, inputDict);
+                  if (Array.isArray(conversationHistory)) {
+                    conversationHistory.push(inputDict);
+                  }
+                  if (saveResult) {
+                    addLog("User message saved successfully", "success");
+                  }
+                  currentInputTranscriptRef.current = "";
                 }
-                const saveResult = saveMessage(sessionId, inputDict);
-                conversationHistory.push(inputDict);
-                if (saveResult) {
-                  addLog("User message saved successfully", "success");
+                if (currentOutputTranscriptRef.current) {
+                  setOutputTranscript(currentOutputTranscriptRef.current);
+                  console.log("output:", outputTranscript);
+                  addLog(
+                    `[saveMessage] Model Output: ${outputTranscript}`,
+                    "info"
+                  );
+                  const outputDict={
+                    sender: "bot",
+                    type: "model",
+                    text: currentOutputTranscriptRef.current,
+                    timestamp: new Date().toISOString(),
+                  };
+                  if (Array.isArray(conversationHistory)) {
+                    conversationHistory.push(outputDict);
+                  }
+                  const saveResult = await saveMessage(sessionId, outputDict);
+                  if (saveResult) {
+                    addLog("Model message saved successfully", "success");
+                  }
+                  currentOutputTranscriptRef.current = "";
                 }
-                currentInputTranscriptRef.current = "";
-              }
-              if (currentOutputTranscriptRef.current) {
-                setOutputTranscript(currentOutputTranscriptRef.current);
-                console.log("output:", outputTranscript);
-                addLog(
-                  `[saveMessage] Model Output: ${outputTranscript}`,
-                  "info"
-                );
-                const outputDict={
-                  sender: "bot",
-                  type: "model",
-                  text: currentOutputTranscriptRef.current,
-                  timestamp: new Date().toISOString(),
-                }
-                conversationHistory.push(outputDict);
-                const saveResult = saveMessage(sessionId, outputDict);
-                if (saveResult) {
-                  addLog("Model message saved successfully", "success");
-                }
-                currentOutputTranscriptRef.current = "";
-              }
-              addLog("Turn completed", "success");
+                addLog("Turn completed", "success");
+              })();
               break;
 
             case "error":
@@ -707,30 +710,35 @@ const GeminiAudioChatModal = ({
   const synthesizeEmotionPCM = async (emotionText) => {
     return new Promise((resolve, reject) => {
       try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)(
-          { sampleRate: 16000 }
-        );
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         const utter = new window.SpeechSynthesisUtterance(emotionText);
         utter.lang = "en-US";
-
+        // Try to select a more human-like voice
+        const voices = window.speechSynthesis.getVoices();
+        // Prefer Google or Microsoft neural voices if available
+        const preferredVoice = voices.find(v => v.name.toLowerCase().includes("google") || v.name.toLowerCase().includes("microsoft"))
+          || voices.find(v => v.lang === "en-US" && v.localService)
+          || voices[0];
+        if (preferredVoice) {
+          utter.voice = preferredVoice;
+          console.log("[TTS] Using voice:", preferredVoice.name);
+        }
+        // Make TTS sound more natural
+        utter.pitch = 1.05;
+        utter.rate = 0.97;
+        utter.volume = 1.0;
         // Create a gain node to capture the audio
         const gainNode = audioCtx.createGain();
         const dest = audioCtx.createMediaStreamDestination();
         gainNode.connect(dest);
-
         utter.onend = async () => {
           try {
-            // Use webm format as PCM is not widely supported
-            const recorder = new MediaRecorder(dest.stream, {
-              mimeType: "audio/webm;codecs=opus",
-            });
+            const recorder = new MediaRecorder(dest.stream, { mimeType: "audio/webm;codecs=opus" });
             let chunks = [];
-
             recorder.ondataavailable = (e) => chunks.push(e.data);
             recorder.onstop = async () => {
               const blob = new Blob(chunks, { type: "audio/webm" });
               const arrayBuffer = await blob.arrayBuffer();
-
               let audioBuffer;
               try {
                 audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
@@ -738,10 +746,7 @@ const GeminiAudioChatModal = ({
                 resolve(null);
                 return;
               }
-
               let pcm = audioBuffer.getChannelData(0);
-
-              // Resample to 16kHz if needed
               if (audioBuffer.sampleRate !== 16000) {
                 const ratio = audioBuffer.sampleRate / 16000;
                 const newLength = Math.floor(pcm.length / ratio);
@@ -751,24 +756,19 @@ const GeminiAudioChatModal = ({
                   const idxLow = Math.floor(idx);
                   const idxHigh = Math.min(Math.ceil(idx), pcm.length - 1);
                   const weight = idx - idxLow;
-                  resampled[i] =
-                    (1 - weight) * pcm[idxLow] + weight * pcm[idxHigh];
+                  resampled[i] = (1 - weight) * pcm[idxLow] + weight * pcm[idxHigh];
                 }
                 pcm = resampled;
               }
-
-              // Convert to 16-bit PCM
               const pcm16 = convertTo16BitPCM(pcm);
               resolve(pcm16);
             };
-
             recorder.start();
             setTimeout(() => recorder.stop(), 1000);
           } catch (err) {
             reject(err);
           }
         };
-
         window.speechSynthesis.speak(utter);
       } catch (err) {
         reject(err);
@@ -894,28 +894,44 @@ const GeminiAudioChatModal = ({
     audioProcessorRef.current = null;
   };
 
-const analyzeDistressScore = async (inputText) => {
-    if (!inputText || inputText.trim() === "") return;
+  // Refactored: analyzeDistressScore returns the score
+  const analyzeDistressScore = async (inputText) => {
+    if (!inputText || inputText.trim() === "") return 0;
     try {
-      console.log("[Distress] Sending text for distress score:", inputText); // Log input
-      const response = await fetch(`${GEMINI_BACKEND_URL}/api/distress-score`, {
+      const formattedHistory = (conversationHistory || []).map((msg) => ({
+        sender: msg.sender || '',
+        type: msg.type || '',
+        text: msg.text || msg.content || '',
+        timestamp: msg.timestamp || null,
+        emotion: msg.emotion || null,
+        distress: msg.distress || null,
+      }));
+      // Log the payload being sent to the distress score API
+      console.log("[Distress] Payload to API:", {
+        text: inputText,
+        conversationHistory: formattedHistory
+      });
+      console.log("[Distress] Endpoint:", `http://localhost:8000/api/distress-score`);
+      const response = await fetch('http://localhost:8000/api/distress-score', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: inputText, conversationHistory:messages }),
+        body: JSON.stringify({ text: inputText, conversationHistory: formattedHistory }),
       });
       if (!response.ok) throw new Error("API error");
       const data = await response.json();
-      setDistressScore(data.score);
-      if (data.score >= 7) {
+      // Always update distress state
+      setDistress(data.score || 0);
+      // Show notification only if distress is high
+      if (typeof data.score === 'number' && data.score >= 7) {
         notification.warning({
           message: 'You may need support',
           description: (
             <div>
               <div>Your distress score is high. Consider reaching out for help:</div>
               <ul style={{ margin: '8px 0 0 0', padding: 0, listStyle: 'none' }}>
-                <li><Link to="/helpline">Helpline Resources</Link></li>
-                <li><Link to="/therapists">Book a Therapist</Link></li>
-                <li><Link to="/relaxationtools">Relaxation Tools</Link></li>
+                <li><a href="/helpline">Helpline Resources</a></li>
+                <li><a href="/therapists">Book a Therapist</a></li>
+                <li><a href="/relaxationtools">Relaxation Tools</a></li>
               </ul>
             </div>
           ),
@@ -924,14 +940,16 @@ const analyzeDistressScore = async (inputText) => {
           style: { width: 340 },
         });
       }
-      // Log distress score and emotion immediately after update
       setTimeout(() => {
         console.log("[Distress] API response:", data); // Log full API response
         console.log("[Distress] Distress score for message:", data.score);
         console.log("[Distress] Emotion for message:", emotion.current);
       }, 0);
+      return data.score || 0;
     } catch (err) {
+      setDistress(0); // Reset distress on error
       console.error("[Distress] Distress score analysis failed", err);
+      return 0;
     }
   };
 

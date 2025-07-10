@@ -26,7 +26,7 @@ def get_access_token():
 
 class GeminiAudioService:
     def __init__(self):
-        self.api_key = 'ya29.c.c0ASRK0GZWKAvCtamzsBDxG4gZw971dHRoui5k8XoeQOzH-0p34rUKeBH-FJRB2xrtwHbMFfFRa1WW2yQoNxzlv1eOqogkcSWGCUOj_PASPxW8JlbWBmlElP2b4_4uHZ9kpqgNAEKMBpqRukY4VMH4kiRcg0P1tzQwKmYMgUQeeZxgV-agN110_ptea0kqCXH4AVmBSH7KtQNFv9SoLjteGSHtnKTmEQcoa8aokLAJ3wCC6wbNSHj-CuPsISTpE9NAX2rMi5WSiGV6Vk2gVXiNeFHPjCv78frSJwpb4H7hQDlgiEktoeXHbWAdeCwz5YlOvrEwsQSQnw5c7Nq2xG7iXW6XRyS0J3LpoaOkTK4A9PPOZre98IJorSBJ1yvCH389A5cFWq_qbIl9-_ZlWzse6svaVVcaJ8Wg44UuYWos4s3wnVUSs7qVhdMoy396Ox-QgY0dJ_BIU6_6YaRQkm6rtXvncfcFR2yXzlQnRsxszg_MlZ8YcjQkXp5p5X8XJq3cQghjWdpnys20ezBcou4ORFnnifXIUY7XecXpoFRR7dbrBQZQ4qqjVZUUtMapuwSrWfkMzfk1FX6Yhis2W8IfbZy5cwI9g36Fcivo9lcne61vqZgMskRo8frpBj_QpeF1V35_io0rMxY2qxb91_t3_VWa9jJVcWBo9p5eh7Zu1vrxQUiJdl7RjM9Y45WptQW1zYarkI0Q2nIiFS4qyp1u5whFlRxWf_Qojv7olmBaqSoVXlB7UaQickhpZx9tlXeRel0yczVJ6Ow4Sv3RZrUkcX8qYeky1e47Bs0Fg3wBYp-lcaUnpzbMQ7acIFxVsoooe9V0Rs2aUfFygc99lVsycwh5Vnk3Yto86_IU8UWufb5jy42xp8Y9Yu5BOZm7la_V1vFi5fqsp-aS2petieSOVpebQMJ_iQ0codw7--U8-jdhBykSMnMt9I4ua-tSO1li-mIuVBBv1fShFq1FsBw74h3ioW4WQFzYZm0_0bhJfciqVFMspcbFwJj'
+        self.api_key = 'ya29.c.c0ASRK0GZknG4a5r6mK023LdgpUWx_U6C_USEdaXtj7GD_Ppk-Y7HbOLwWN1WpHaudqCpyYjmAqPfbF6RrtLYdi78hcVSJeCzWkAo8SEA9REA6iEQXMA-W5s77e5uMsSjTQWqDtOloR3oNjd1dHZTgO0sy9qABvbMYpEu280CHlcLSy2diZYw5l9ZsEtaw2gqmazNsnj5alJKjoNfTZsSGVPa_XvBnUtiCWXzb8vPO9drcsjzz3x4h8327yuCQ_uXaJ2D5-x0Wx9EzmtLWWGsJtzSwZiG7_EiFxt4UPnJCwFbKLEzbhcr-PGG6d8OtaBMiHyZ37LTegtBDLO7le7k4qSSaKMGF0pqhyMUje3a5zAuxpIQXfQwDp7BDADcL388Po8lOgMYQeb7wum9ek1iQVMo828Meu5tyu4at4wqaY3ei957BYZ8o62s85aMq3rQkjJReQpgYOoV2Of1FQ82pk83JuIZ7ZvxUFkxaF9wk_mahl-j3pS8ddIIvg3B4yY7xOebo6JpfZ56sOUo4uhy_6RzcryJXV39hYj37475IFtmYhdiX0g7YXFrfZgUylmIVzfR4Q-aqf1Z1ei6jz8Ryyb562QuhbJII4gYFwuB7WjJRgSOcjpgs3gaOxUo-5gV7gVr_6Fq2g8Q9d9sJ6-e8nRIrSndOJ-BaVqYJdyjXvQ15uspYMWi-n58-oJVz28QYR9qy0nrxsvlBiq_gZ-q-MhbYjfYg90wBbJel8Vdr3ZsYX6MxnjkJMgJb_h35d16IxqoFBfhz2e1cJ9nM01_YSovg9h97QIYm2v42osolvX8oe4lrg7vSkOrwmpo8gd63z4WB0beR1nrOWnSixvVXxFFxVwcJwzh6_cwghMWWv_drqa1kI2pjqYvh_FzjinouV4viaxv41_yvBlSackctWJ9r4_fc4uQ-c8xqk3SznBQad1BWiw2fbV3hZW6Bk8e2cjd7OXVFkw3q_kOIfJ_jtFYd19awn231R5d5vVXohFkYez6359OiMiy'
         self.websocket = None
         self.connected = False
         self.config = None
@@ -56,7 +56,8 @@ class GeminiAudioService:
                                 "voiceName": config.get("voice_name", "Puck")
                             }
                         }
-                    }
+                    },
+                "enable_affective_dialog":True,
                 },
                 "inputAudioTranscription": {},
                 "outputAudioTranscription": {},
