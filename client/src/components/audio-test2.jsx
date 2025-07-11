@@ -56,15 +56,19 @@ const GeminiAudioChatModal = ({
   const currentOutputTranscriptRef = useRef("");
   const NODE_BACKEND_URL = "http://localhost:4000";
   // Audio configuration
-  // Increase buffer sizes for smoother playback
+  // Adjusted for faster response and reliability
   const AUDIO_CONFIG = {
     sampleRate: 24000,
     bufferSize: 12288,
-    minBufferChunks: 10,
-    maxBufferChunks: 25,
-    crossfadeDuration: 0.01,
+    minBufferChunks: 3, // Lower for faster start
+    maxBufferChunks: 20,
+    crossfadeDuration: 0.025, // Shorter crossfade for snappier response
     lookAheadTime: 0.02,
     targetLatency: 0.02,
+    underrunPause: 60, // ms to wait if underrun
+    fadeInDuration: 0.005, // 5ms fade in
+    fadeOutDuration: 0.005, // 5ms fade out
+    chunkTimeout: 3000, // ms to wait before skipping stuck chunk
   };
   const addLog = useCallback((message, type = "info") => {
     const timestamp = new Date().toLocaleTimeString();
@@ -180,11 +184,9 @@ const GeminiAudioChatModal = ({
   const processAudioQueue = async () => {
     if (isPlayingRef.current) return;
     if (audioBufferRef.current.length === 0) return;
-    if (
-      !isPlaying &&
-      audioBufferRef.current.length < AUDIO_CONFIG.minBufferChunks
-    ) {
-      setTimeout(processAudioQueue, 30);
+    // Underrun protection: wait for enough buffer before starting
+    if (!isPlaying && audioBufferRef.current.length < AUDIO_CONFIG.minBufferChunks) {
+      setTimeout(processAudioQueue, AUDIO_CONFIG.underrunPause);
       return;
     }
     try {
@@ -205,39 +207,54 @@ const GeminiAudioChatModal = ({
           setTimeout(processAudioQueue, 100);
         return;
       }
+      // Stop previous source if still playing
+      if (currentSourceRef.current) {
+        try {
+          currentSourceRef.current.stop();
+        } catch (e) {}
+        currentSourceRef.current = null;
+      }
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;
       // Use crossfade gain for smooth transitions
       source.connect(crossfadeGainRef.current);
-      // Crossfade logic
+      // Fade-in and fade-out to avoid clicks
       const now = audioContextRef.current.currentTime;
       let startTime = now;
       if (playbackStartTimeRef.current > now) {
         startTime = playbackStartTimeRef.current;
       }
-      // Schedule crossfade in
+      // Fade-in
       crossfadeGainRef.current.gain.cancelScheduledValues(startTime);
       crossfadeGainRef.current.gain.setValueAtTime(0, startTime);
       crossfadeGainRef.current.gain.linearRampToValueAtTime(
         1,
-        startTime + AUDIO_CONFIG.crossfadeDuration
+        startTime + AUDIO_CONFIG.fadeInDuration
       );
-      // Schedule crossfade out for next chunk
+      // Fade-out
+      crossfadeGainRef.current.gain.setValueAtTime(1, startTime + audioBuffer.duration - AUDIO_CONFIG.fadeOutDuration);
+      crossfadeGainRef.current.gain.linearRampToValueAtTime(
+        0,
+        startTime + audioBuffer.duration
+      );
+      // Watchdog: skip chunk if it doesn't end in time
+      let chunkTimeout = setTimeout(() => {
+        addLog("Audio chunk timeout, skipping to next.", "warning");
+        try { source.stop(); } catch (e) {}
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+        if (audioBufferRef.current.length > 0) processAudioQueue();
+      }, AUDIO_CONFIG.chunkTimeout);
+      // Crossfade out for next chunk
       source.onended = () => {
+        clearTimeout(chunkTimeout);
         addLog("Audio chunk playback ended", "info");
         isPlayingRef.current = false;
         setIsPlaying(false);
         setAudioQueueLength(audioBufferRef.current.length);
-        // Crossfade out
-        const endTime = audioContextRef.current.currentTime;
-        crossfadeGainRef.current.gain.cancelScheduledValues(endTime);
-        crossfadeGainRef.current.gain.setValueAtTime(1, endTime);
-        crossfadeGainRef.current.gain.linearRampToValueAtTime(
-          0,
-          endTime + AUDIO_CONFIG.crossfadeDuration
-        );
         if (audioBufferRef.current.length > 0) processAudioQueue();
       };
+      currentSourceRef.current = source;
       addLog(
         `Starting playback: duration=${audioBuffer.duration.toFixed(
           3
@@ -389,7 +406,7 @@ const GeminiAudioChatModal = ({
             config: {
               model: "models/gemini-2.5-flash-preview-native-audio-dialog",
               response_modalities: ["AUDIO"],
-              voice_name: "Charon",
+              voice_name:"Puck",
               systemContext: {
                 user_profile: userProfile,
                 conversation_history: conversationHistory,
