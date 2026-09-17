@@ -71,7 +71,7 @@ class GeminiLiveClient:
         # Fixed setup message structure based on official documentation
         setup_message = {
             "setup": {
-                "model": config.get("model", "models/gemini-2.5-flash-preview-native-audio-dialog"),
+                "model": config.get("model", "models/gemini-2.5-flash-native-audio-preview-12-2025"),
                 "generationConfig": {  # Fixed: was "generation_config"
                     "responseModalities": config.get("response_modalities", ["AUDIO", "TEXT"]),  # Fixed: was "response_modalities"
                     "speechConfig": {  # Fixed: was "speech_config"
@@ -324,7 +324,7 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for client connections"""
     
     # Get API key from environment or query parameter
-    api_key = ' ya29.c.c0ASRK0GZ3sSms8p6t_ani1gNBxPkI39g3luK9HNzuafP5cSid-uZCynrjAdvfc-qoYnyKQisLPwDZai-OKmAsAWJy_gvObMA9LkMMp2aAZvRg8tq7DR5kYu1bvzhPGOzFKbS_gguGhIV0oPJ2iFmhkf_DB6ceZnNIOLa13wF2Yv7pvhl0e9q3ECGc3ESKEWyJfm0mxS1kA4s20s5FjyTQFw3XD1nsnHodXx-2xxhou77BEm4gq2wMy7CuFS23Lf06daxUSeZpbJa1rfdYjhOQ4WRrhpBilcZVU5sYciVY9vn-952CTjJv3Y1dm8MJYCBcef2_CHhJrEqxR5jcNPdaqMK1foDYsRNab4QIbVElVN1XTeQBLEAvtGMhHJYH388AuyjdI4nbhxn7-S1SuzroeSmtgd4OezVxWJ3Ff1O1B7B9VepsOQ3uMsaf2hUvxuZkWjIBin2ko8psJhmpqsWx46datwswOksd8lzBrWprY6vOk34xWVfQMrkFunlel5oBvS6JXv3Y_OrFjhzelVtX0Jvf_Y52cb7mQRF4u9-b45OpY35Q7giu8v0t0jon9jk2v4iwjggw5Y3-xx9xirFVqrJZcJ8elVsbvxZgaukJMWgiOSgJW7nrxmUgmfZr7Yt_M4hmQXUv5SRQOosBnoQukg9-p3v4iUv3jewlUVObhSdlQy83apFt4tqQqmUJun8hoh49bXru_XXxJVikcakZbnOS3lMtpvV5e9_wd84_X_ZF68oc1ijdBgYl7ZBUj_n9U9h1pXkwqXgr5gXyXxe3kpi-o6IRlyez_e1Yvc-x6aJ7daq3hxfhs2_4ivxb2b_n2ZtnW9wWOSsRqepBiJaodYqaf86-tU7_tByvFzwdheRv6norwydm3kg_5c_gOzqOe5tk_cXv2705d-0RZ4uaV_-71Z4x0hWJ3Q3q4cBgqx1ni6fbxXfMcjOJzp4vhRJ5Y80g641fa6_baRFfnZ0rlRQs1OU01wQ6oJb-ct9Ujox6RmgcVJ4knFS'
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         await websocket.close(code=1008, reason="GEMINI_API_KEY not found")
         return

@@ -44,6 +44,9 @@ def get_config_from_setup(setup_data, default_model):
     tools = setup_data.get("tools")
     session_resumption = setup_data.get("sessionResumption")
     gemini_config = dict(config)
+    response_modalities = gemini_config.get("responseModalities", ["TEXT"])
+    if "TEXT" in response_modalities:
+        model = default_model
 
     if systemContext:
         user_profile = systemContext.get("user_profile")

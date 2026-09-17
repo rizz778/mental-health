@@ -9,7 +9,7 @@ logger = logging.getLogger("gemini_service")
 
 
 class GeminiService:
-    def __init__(self, api_key, model="gemini-2.0-flash-live-001"):
+    def __init__(self, api_key, model="gemini-2.5-flash-native-audio-preview-12-2025"):
         self.client = genai.Client(api_key=api_key)
         self.model = model
 

@@ -3,18 +3,21 @@ import json
 import logging
 from xml.parsers.expat import model
 from google import genai
+from google.genai import types
 
 
 logger = logging.getLogger(__name__)
 
 class GeminiService:
-    def __init__(self, api_key, model="gemini-2.0-flash-live-001"):
-        self.client = genai.Client(api_key=api_key)
+    def __init__(self, api_key, model="gemini-live-2.5-flash-preview"):
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(api_version="v1alpha"),
+        )
         self.model = model
 
     async def start_session(self, config, model=None):
         # Enable context window compression with a sliding window
-        from google.genai import types
         # If config is a dict, build a LiveConnectConfig object
         if isinstance(config, dict):
             config = types.LiveConnectConfig(

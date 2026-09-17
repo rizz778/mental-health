@@ -99,7 +99,8 @@ Important guidelines:
 Remember: You're having a voice conversation, so keep responses natural and spoken-word friendly."""
 
             # Configure the model for mental health support
-            client = genai.Client(api_key='AIzaSyA7305RGIlw82ON0bC994O_YHh4Kklc_aI')
+            from core.config import settings
+            client = genai.Client(api_key=settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY"))
 
         # Configure for live audio interaction
             config = types.LiveConnectConfig(

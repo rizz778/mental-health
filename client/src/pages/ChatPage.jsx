@@ -544,7 +544,7 @@ const ChatPage = () => {
 
         const setupMsg = {
           setup: {
-            model: "gemini-2.0-flash-live-001",
+            model: "gemini-3.1-flash-live-preview",
             generationConfig: {
               responseModalities: ["TEXT"],
             },
@@ -998,7 +998,7 @@ const ChatPage = () => {
           wsRef.current.send(
             JSON.stringify({
               setup: {
-                model: "gemini-2.0-flash-live-001",
+                model: "gemini-3.1-flash-live-preview",
                 systemContext,
                 systemInstruction: systemInstruction.trim() || undefined,
                 tools: toolsEnabled ? [{}] : undefined,

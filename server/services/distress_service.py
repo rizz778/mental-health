@@ -3,8 +3,9 @@ import google.generativeai as genai
 import re
 import json
 from typing import List, Dict
+from core.config import settings
 
-GEMINI_API_KEY = 'AIzaSyA7305RGIlw82ON0bC994O_YHh4Kklc_aI'
+GEMINI_API_KEY = settings.GEMINI_API_KEY
 
 # Configure Gemini API
 if GEMINI_API_KEY:

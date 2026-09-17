@@ -346,7 +346,7 @@ const Test = () => {
         // Send initial setup message
         const setupMsg = {
           setup: {
-            model: "gemini-2.0-flash-live-001",
+            model: "gemini-3.1-flash-live-preview",
             generationConfig: {
               responseModalities: ["TEXT"],
             },

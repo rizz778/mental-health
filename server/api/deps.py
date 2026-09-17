@@ -22,7 +22,10 @@ class DependencyStorage:
     
 async def initialize_dependencies():
     global dependency_storage
-    dependency_storage = DependencyStorage(api_key=settings.GEMINI_API_KEY, gemini_model=settings.GEMINI_MODEL)
+    dependency_storage = DependencyStorage(
+        api_key=settings.GEMINI_API_KEY,
+        gemini_model=settings.GEMINI_TEXT_MODEL or settings.GEMINI_MODEL,
+    )
 
 def get_gemini_service() -> GeminiService:
     if dependency_storage is None:

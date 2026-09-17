@@ -404,7 +404,7 @@ const GeminiAudioChatModal = ({
           JSON.stringify({
             type: "setup",
             config: {
-              model: "models/gemini-2.5-flash-preview-native-audio-dialog",
+              model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
               response_modalities: ["AUDIO"],
               voice_name:"Puck",
               systemContext: {

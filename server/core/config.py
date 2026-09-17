@@ -38,7 +38,15 @@ class Settings(BaseSettings):
     #GPT
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: Optional[str] = None
+    GEMINI_TEXT_MODEL: str = "gemini-3.1-flash-live-preview"
+    GEMINI_AUDIO_MODEL: str = "gemini-2.5-flash-native-audio-preview-12-2025"
     DISTRESS_API_KEY: Optional[str] = None
+
+    @validator("DEBUG", pre=True)
+    def parse_debug(cls, v):
+        if isinstance(v, str) and v.lower() in {"release", "production", "prod"}:
+            return False
+        return v
     
     @validator("ALLOWED_ORIGINS", pre=True)
     def parse_allowed_origins(cls, v):

@@ -3,9 +3,26 @@ import numpy as np
 from collections import deque, Counter
 from typing import Deque, Dict
 import logging
-from deepface import DeepFace  # Or your preferred model
 
 logger = logging.getLogger(__name__)
+
+_deepface = None
+_deepface_load_error = None
+
+
+def get_deepface():
+    global _deepface, _deepface_load_error
+    if _deepface_load_error is not None:
+        raise _deepface_load_error
+    if _deepface is None:
+        try:
+            from deepface import DeepFace
+
+            _deepface = DeepFace
+        except Exception as exc:
+            _deepface_load_error = exc
+            raise
+    return _deepface
 
 class EmotionService:
     def __init__(self, buffer_size: int = 10):
@@ -13,7 +30,8 @@ class EmotionService:
 
     def analyze_frame(self, frame: np.ndarray) -> str:
         try:
-            result = DeepFace.analyze(frame, actions=["emotion"], 
+            deepface = get_deepface()
+            result = deepface.analyze(frame, actions=["emotion"], 
             enforce_detection=False)
             logger.info(f"[Emotion] DeepFace result: {result}")
             # Handle both dict and list return types

@@ -7,6 +7,7 @@ from fastapi import WebSocket
 from typing import Dict, Any
 import google.auth.transport.requests
 from google.oauth2 import service_account
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +27,16 @@ def get_access_token():
 
 class GeminiAudioService:
     def __init__(self):
-        self.api_key = 'ya29.c.c0ASRK0Ga8URlvPEQ8eay5jNyydpMAlMJQrLrYEn2rY364JzEyTCkJzg54MD0OYHBqUaoHAsdnOxlgrIDskU2hQsh82TFcNGO4kgH7zXUgAsTa_qlnYQ2ogrxEXmbvt7NeiQicJiFJF-hcXAgjoDUPFVSK4IjzP71hkRaL9TsXAdhBStTcTHQw9ZrE_mTpJVGaWMibphA0AaDgj6FLV2Axr8AkcsPaBuCNQGTXqTJGFBIXdqsDDsv7j1a9PgpCZUcGvX_j88bj0VsbxLiuIGJu5XQfxwe26a52docYfXEHW6zW_EoLmRrHmCNwsU6S4v4cQkirrX86scNTV2bq0l3knvvLuXacMbVV8NBeCFDNP_vCtlBJdP_BkpSuR5gN388DZXul11sSox38vi86qpOX7s0yR5J_eJrU3UnJ4VztSfl29-v9I2YMiO1_knlOw9i12pvY9-u2tgJW_qoW20z-7rj3SmtoOgfrZQ9ll491uJIkIvblv9BqXsW9zu3cS9igioWWnvS_h15mt4OUeFWieinzjMmtnlcR6ahOZIdn7B5MzF4YJhWtagirgV_aR_RM3XmsUOk-rrhU4o3csMFUtn4o5xz0mB0Fb1XVFonZxUa4-jBhriSheSfOI0imz9Xwd4fp6IgUucm7YoRuedgmuVj09a1SaFihnc4wVMwVW6-hm-Sw3qR2S5tWtyWuoir83cVgrV8Sxf_12i_8Bu4dXRZIaSkRu9thqzn68J213W1-g-w_21kQO1nQuzc1UXtu-teR8YJrtFw_FJ0lI2b7B22uzluu5MSRwe2a94zR_kv3oFa-QzJRmQrrbQxi78Fnb3y50lfMo-wnlnmdQI5s0OrkIUbd-6b67QlwlWMtIumh_OOdY9l0IYWZSdOVaes8qJVfBZaXbrkYbJpi4BxJvkWMhO-1Fn7ydqheOUv_2MSl9SqpVvwW2nY-ft2yoncwZkM5iis9is-F3zd_ISkzO8r1IU8RslslV1B5VraYba5q1ca9bxfXnhn'
+        self.api_key = settings.GEMINI_API_KEY
         self.websocket = None
         self.connected = False
         self.config = None
         
     async def connect(self):
-        url = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+        url = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
         logger.info("[GeminiAudioService] Connecting to Gemini WebSocket...")
@@ -47,7 +49,7 @@ class GeminiAudioService:
         # Synthetic multi-turn conversation history with emotion context
         setup_message = {
             "setup": {
-                "model": config.get("model", "models/gemini-2.5-flash-preview-native-audio-dialog"),
+                "model": config.get("model", f"models/{settings.GEMINI_AUDIO_MODEL}"),
                 "generationConfig": {
                     "responseModalities": config.get("response_modalities", ["AUDIO"]),
                     "speechConfig": {
