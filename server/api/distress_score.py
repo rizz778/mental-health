@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from services.distress_service import llm_distress_score
@@ -19,7 +20,7 @@ class DistressRequest(BaseModel):
 @router.post("/api/distress-score")
 async def distress_score_endpoint(request: DistressRequest):
     try:
-        score = llm_distress_score(request.text,request.conversationHistory)
+        score = await asyncio.to_thread(llm_distress_score, request.text, request.conversationHistory)
         return {"score": score}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

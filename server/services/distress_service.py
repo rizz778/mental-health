@@ -1,19 +1,11 @@
 import os
-import google.generativeai as genai
 import re
 import json
 from typing import List, Dict
+from google import genai
 from core.config import settings
 
-GEMINI_API_KEY = settings.GEMINI_API_KEY
-
-# Configure Gemini API
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
-
-
-def llm_distress_score(text: str,conversationHistory: List[Dict]) -> float:
+def llm_distress_score(text: str, conversationHistory: List[Dict]) -> float:
     prompt = f"""
 You are an expert mental health assessment assistant. Your task is to evaluate the user's current level of emotional distress based on their latest message and the recent conversation history.
 
@@ -41,8 +33,11 @@ Recent Conversation History:
 {conversationHistory}
 """
     try:
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
-        response = model.generate_content(prompt)
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
         raw_text = response.text.strip()
         # Extract the first number between 0 and 10
         match = re.search(r'([0-9]+(?:\.[0-9]+)?)', raw_text)

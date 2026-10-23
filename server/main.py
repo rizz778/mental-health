@@ -17,6 +17,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from api.deps import initialize_dependencies
 from api.ws.router import router as ws_router
 from api import distress_score
+from core.json import custom_jsonable_encoder
 
 
 
@@ -33,7 +34,6 @@ async def lifespan(app: FastAPI):
 
 class CustomJSONResponse(JSONResponse):
     def render(self, content) -> bytes:
-        from core.json import custom_jsonable_encoder  # Fixed import
         return super().render(custom_jsonable_encoder(content))
 
 app = FastAPI(

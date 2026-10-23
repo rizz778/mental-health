@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from collections import deque, Counter
-from typing import Deque, Dict
+from typing import Deque, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class EmotionService:
     def __init__(self, buffer_size: int = 10):
         self.buffer: Deque[str] = deque(maxlen=buffer_size)
 
-    def analyze_frame(self, frame: np.ndarray) -> str:
+    def analyze_frame(self, frame: np.ndarray, buffer: Optional[Deque[str]] = None) -> str:
         try:
             deepface = get_deepface()
             result = deepface.analyze(frame, actions=["emotion"], 
@@ -41,14 +41,15 @@ class EmotionService:
                 emotion = result[0].get("dominant_emotion", "unknown")
             else:
                 emotion = "unknown"
-            self.buffer.append(emotion)
+            (buffer if buffer is not None else self.buffer).append(emotion)
             return emotion
         except Exception as e:
             logger.warning(f"Emotion analysis failed: {e}")
             return "unknown"
 
-    def get_aggregated_emotion(self) -> str:
-        if not self.buffer:
+    def get_aggregated_emotion(self, buffer: Optional[Deque[str]] = None) -> str:
+        buf = buffer if buffer is not None else self.buffer
+        if not buf:
             return "neutral"
-        most_common = Counter(self.buffer).most_common(1)
+        most_common = Counter(buf).most_common(1)
         return most_common[0][0]

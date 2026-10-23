@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 import json
 import logging
 import base64
@@ -19,6 +20,7 @@ router = APIRouter(prefix='', tags=["ws"])
 
 # Store latest emotion per client
 client_emotions = {}
+client_buffers = {}
 
 def is_valid_turn(turn):
     return (
@@ -95,16 +97,16 @@ def get_config_from_setup(setup_data, default_model):
         if session_resumption:
             gemini_config["session_resumption"] = types.SessionResumptionConfig(handle=session_resumption.get("handle"))
         return model, gemini_config
-                # Compose system instruction
+
         
-        if user_profile:
-            system_instruction += f"User profile: {json.dumps(user_profile)}. "
-            if conversation_history and isinstance(conversation_history, list) and len(conversation_history) > 0:
-                last_msgs = conversation_history[-5:] if len(conversation_history) > 5 else conversation_history
-                history_str = "Conversation so far: " + " ".join(
-                        f"[{msg.get('sender','')}: {msg.get('text','')} ]" for msg in last_msgs
-                    )
-                system_instruction += history_str
+
+
+
+
+
+
+
+
         
     if system_instruction:
         gemini_config["system_instruction"] = types.Content(parts=[types.Part(text=system_instruction)])
@@ -125,6 +127,7 @@ async def websocket_endpoint(
     active_sessions = {}
     await websocket.accept()
     client_id = f"client_{id(websocket)}"
+    client_buffers[client_id] = deque(maxlen=10)
     text_receive_task = None
 
     try:
@@ -256,8 +259,8 @@ async def websocket_endpoint(
                     img_bytes = base64.b64decode(frame_b64)
                     logger.info(f"[Emotion] Decoded image bytes length: {len(img_bytes)}")
                     # Convert bytes to numpy array
-                    with open("debug_frame.png", "wb") as f:
-                        f.write(img_bytes)
+                    # with open("debug_frame.png", "wb") as f:
+                        # f.write(img_bytes)
 
                     np_arr = np.frombuffer(img_bytes, np.uint8)
                     logger.info(f"[Emotion] Numpy array shape: {np_arr.shape}, dtype: {np_arr.dtype}")
@@ -273,8 +276,8 @@ async def websocket_endpoint(
                         await websocket.send_json({"error": "Black frame received"})
                         continue
 
-                    current_emotion = emotion_service.analyze_frame(frame)
-                    aggregated = emotion_service.get_aggregated_emotion()
+                    current_emotion = await asyncio.to_thread(emotion_service.analyze_frame, frame, client_buffers.get(client_id))
+                    aggregated = emotion_service.get_aggregated_emotion(buffer=client_buffers.get(client_id))
 
                     # Store latest emotion and timestamp for this client
                     client_emotions[client_id] = {
@@ -325,6 +328,9 @@ async def websocket_endpoint(
 
         if client_id in client_emotions:
             del client_emotions[client_id]
+
+        if client_id in client_buffers:
+            del client_buffers[client_id]
 
         logger.info(f"[WebSocket] Cleanup completed for {client_id}")
 
