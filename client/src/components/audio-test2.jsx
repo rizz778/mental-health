@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff } from "lucide-react";
-import { Modal, Button, Alert ,notification} from "antd";
+import { Modal, Button, Alert, notification } from "antd";
 
 const GeminiAudioChatModal = ({
   visible,
@@ -25,7 +25,7 @@ const GeminiAudioChatModal = ({
   const [outputTranscript, setOutputTranscript] = useState("");
   const [distress, setDistress] = useState(0);
   const [log, setLog] = useState("");
-  
+
   // Refs for audio management
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -55,9 +55,13 @@ const GeminiAudioChatModal = ({
   // Transcript accumulators
   const currentInputTranscriptRef = useRef("");
   const currentOutputTranscriptRef = useRef("");
+
+
   const NODE_BACKEND_URL = "http://localhost:4000";
   // Audio configuration
   // Adjusted for immediate response and zero-gap streaming playback
+
+  // add this into config folders
   const AUDIO_CONFIG = {
     sampleRate: 24000,
     bufferSize: 12288,
@@ -71,6 +75,8 @@ const GeminiAudioChatModal = ({
     fadeOutDuration: 0.005,
     chunkTimeout: 3000,
   };
+
+
   const addLog = useCallback((message, type = "info") => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs((prev) => [...prev.slice(-50), { timestamp, message, type }]);
@@ -87,9 +93,9 @@ const GeminiAudioChatModal = ({
     try {
       audioContextRef.current = new (window.AudioContext ||
         window.webkitAudioContext)({
-        sampleRate: AUDIO_CONFIG.sampleRate,
-        latencyHint: "interactive",
-      });
+          sampleRate: AUDIO_CONFIG.sampleRate,
+          latencyHint: "interactive",
+        });
 
       // Create master gain node for volume control
       masterGainRef.current = audioContextRef.current.createGain();
@@ -140,7 +146,7 @@ const GeminiAudioChatModal = ({
         const int16Array = new Int16Array(uint8Array.buffer);
         addLog(
           "PCM first 10 samples: " +
-            Array.from(int16Array.slice(0, 10)).join(", "),
+          Array.from(int16Array.slice(0, 10)).join(", "),
           "info"
         );
         addLog(
@@ -169,8 +175,7 @@ const GeminiAudioChatModal = ({
       addLog(
         `AudioBuffer created: duration=${audioBuffer.duration.toFixed(
           3
-        )}s, sampleRate=${audioBuffer.sampleRate}, length=${
-          audioBuffer.length
+        )}s, sampleRate=${audioBuffer.sampleRate}, length=${audioBuffer.length
         }`,
         "info"
       );
@@ -254,7 +259,7 @@ const GeminiAudioChatModal = ({
     scheduledSourcesRef.current.forEach((src) => {
       try {
         src.stop();
-      } catch (e) {}
+      } catch (e) { }
     });
     scheduledSourcesRef.current = [];
     playbackStartTimeRef.current = 0;
@@ -307,7 +312,7 @@ const GeminiAudioChatModal = ({
             config: {
               model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
               response_modalities: ["AUDIO"],
-              voice_name:"Puck",
+              voice_name: "Puck",
               systemContext: {
                 user_profile: userProfile,
                 conversation_history: conversationHistory,
@@ -360,9 +365,9 @@ const GeminiAudioChatModal = ({
                   // Log emotion and distress before saving
                   console.log("[saveMessage] User Emotion:", savedEmotion);
                   console.log("[saveMessage] User Distress:", distressScore);
-                  addLog(`[saveMessage] User Emotion: ${savedEmotion}` , "info");
-                  addLog(`[saveMessage] User Distress: ${distressScore}` , "info");
-                  const inputDict={
+                  addLog(`[saveMessage] User Emotion: ${savedEmotion}`, "info");
+                  addLog(`[saveMessage] User Distress: ${distressScore}`, "info");
+                  const inputDict = {
                     sender: "user",
                     type: "user",
                     text: currentInputTranscriptRef.current,
@@ -386,7 +391,7 @@ const GeminiAudioChatModal = ({
                     `[saveMessage] Model Output: ${outputTranscript}`,
                     "info"
                   );
-                  const outputDict={
+                  const outputDict = {
                     sender: "bot",
                     type: "model",
                     text: currentOutputTranscriptRef.current,
@@ -515,9 +520,9 @@ const GeminiAudioChatModal = ({
 
       const inputAudioContext = new (window.AudioContext ||
         window.webkitAudioContext)({
-        sampleRate: 16000,
-        latencyHint: "interactive",
-      });
+          sampleRate: 16000,
+          latencyHint: "interactive",
+        });
 
       const source = inputAudioContext.createMediaStreamSource(stream);
       const processor = inputAudioContext.createScriptProcessor(2048, 1, 1); // Smaller buffer for lower latency
@@ -663,7 +668,7 @@ const GeminiAudioChatModal = ({
         audioProcessorRef.current.processor.disconnect();
         audioProcessorRef.current.source.disconnect();
         audioProcessorRef.current.context.close();
-      } catch (error) {}
+      } catch (error) { }
     }
 
     if (streamRef.current) {
@@ -807,7 +812,7 @@ const GeminiAudioChatModal = ({
           audioProcessorRef.current.processor.disconnect();
           audioProcessorRef.current.source.disconnect();
           audioProcessorRef.current.context.close();
-        } catch (error) {}
+        } catch (error) { }
       }
 
       if (streamRef.current) {
