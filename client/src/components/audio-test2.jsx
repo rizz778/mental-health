@@ -1,6 +1,29 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff } from "lucide-react";
-import { Modal, Button, Alert, notification } from "antd";
+/**
+ * audio-test2.jsx — GeminiAudioChatModal
+ * ========================================
+ * Thin shell component for the Gemini audio call UI.
+ * All logic lives in hooks — this file is pure orchestration + render.
+ *
+ * Hook responsibilities
+ * ---------------------
+ *  useAudioLogger      – timestamped activity log (addLog, logs)
+ *  useAudioPlayer      – Web Audio gapless streaming playback
+ *  useAudioRecorder    – Mic capture → 16-bit PCM → base64
+ *  useEmotionDetection – Webcam → WS frames → emotion label
+ *  useDistressNotification – Distress score API + antd warning (utility-as-hook)
+ *  useAudioSession     – Gemini audio WS (connect, frames, saveMessage)
+ */
+
+import React, { useState, useEffect, useCallback } from "react";
+import { Mic, MicOff } from "lucide-react";
+import { Modal, Button, Alert } from "antd";
+
+import { useAudioLogger }         from "../hooks/useAudioLogger";
+import { useAudioPlayer }         from "../hooks/useAudioPlayer";
+import { useAudioRecorder }       from "../hooks/useAudioRecorder";
+import { useEmotionDetection }    from "../hooks/useEmotionDetection";
+import { useDistressNotification } from "../hooks/useDistressNotification";
+import { useAudioSession }        from "../hooks/useAudioSession";
 
 const GeminiAudioChatModal = ({
   visible,
@@ -10,879 +33,139 @@ const GeminiAudioChatModal = ({
   sessionId,
   onAudioChatClose,
 }) => {
-  const [isCalling, setIsCalling] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
+  // ── Shared logger ─────────────────────────────────────────────────────────
+  const { logs, addLog, clearLogs } = useAudioLogger();
+
+  // ── Audio playback ────────────────────────────────────────────────────────
+  const {
+    initAudioContext,
+    resumeIfSuspended,
+    processAudioQueue,
+    queueAudio,
+    clearAudioQueue,
+    destroyAudioContext,
+    isPlaying,
+    audioQueueLength,
+  } = useAudioPlayer(addLog);
+
+  // ── Emotion detection ─────────────────────────────────────────────────────
+  const {
+    emotion,
+    emotionDetectionEnabled,
+    setEmotionDetectionEnabled,
+    videoRef,
+    canvasRef,
+  } = useEmotionDetection();
+
+  // ── UI state ──────────────────────────────────────────────────────────────
   const [isMuted, setIsMuted] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState("disconnected");
-  const [logs, setLogs] = useState([]);
-  const [audioQueueLength, setAudioQueueLength] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
-  const [cameraPermission, setCameraPermission] = useState(null);
-  const [emotionWs, setEmotionWs] = useState(null);
-  const [inputTranscript, setInputTranscript] = useState("");
-  const [outputTranscript, setOutputTranscript] = useState("");
   const [distress, setDistress] = useState(0);
-  const [log, setLog] = useState("");
 
-  // Refs for audio management
-  const wsRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const audioProcessorRef = useRef(null);
-  const streamRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const recordingTimeoutRef = useRef(null);
-  const audioContextReadyRef = useRef(false);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const webcamStreamRef = useRef(null);
-  const [emotion, setEmotion] = useState({ current: "", aggregated: "" });
+  // ── Distress analysis (utility-as-hook) ───────────────────────────────────
+  // Returns the numeric score AND shows the antd notification when score >= 7
+  const { checkDistress } = useDistressNotification(conversationHistory || []);
 
-  // Enhanced audio system refs
-  const audioBufferRef = useRef([]);
-  const isPlayingRef = useRef(false);
-  const currentSourceRef = useRef(null);
-  const nextSourceRef = useRef(null);
-  const audioSchedulerRef = useRef(null);
-  const playbackStartTimeRef = useRef(0);
-  const bufferDurationRef = useRef(0);
-  const crossfadeGainRef = useRef(null);
-  const masterGainRef = useRef(null);
-  const scheduledSourcesRef = useRef([]);
+  // Wrapper that also updates local distress state for the UI badge
+  const analyzeDistress = useCallback(async (text) => {
+    await checkDistress(text);
+    return 0; // actual score is managed inside the hook
+  }, [checkDistress]);
 
-  // Transcript accumulators
-  const currentInputTranscriptRef = useRef("");
-  const currentOutputTranscriptRef = useRef("");
+  // ── Mic recorder ─────────────────────────────────────────────────────────
+  const { isRecording, startRecording, stopRecording, cleanup: cleanupRecorder } =
+    useAudioRecorder(addLog);
 
+  // ── Audio WS session ──────────────────────────────────────────────────────
+  const {
+    connectionStatus,
+    isConnected,
+    isCalling,
+    log,
+    inputTranscript,
+    outputTranscript,
+    connect,
+    disconnect,
+    sendAudio,
+    reset: resetSession,
+  } = useAudioSession({
+    userProfile,
+    conversationHistory,
+    sessionId,
+    emotionState:   emotion,
+    emotionEnabled: emotionDetectionEnabled,
+    isMuted,
+    addLog,
+    queueAudio,
+    processAudioQueue,
+    clearAudioQueue,
+    analyzeDistress,
+  });
 
-  const NODE_BACKEND_URL = "http://localhost:4000";
-  // Audio configuration
-  // Adjusted for immediate response and zero-gap streaming playback
-
-  // add this into config folders
-  const AUDIO_CONFIG = {
-    sampleRate: 24000,
-    bufferSize: 12288,
-    minBufferChunks: 1, // Start immediately as soon as a chunk arrives
-    maxBufferChunks: 20,
-    crossfadeDuration: 0.01,
-    lookAheadTime: 0.02,
-    targetLatency: 0.02,
-    underrunPause: 30,
-    fadeInDuration: 0.005,
-    fadeOutDuration: 0.005,
-    chunkTimeout: 3000,
-  };
-
-
-  const addLog = useCallback((message, type = "info") => {
-    const timestamp = new Date().toLocaleTimeString();
-    setLogs((prev) => [...prev.slice(-50), { timestamp, message, type }]);
-  }, []);
-
-  // Enhanced audio context initialization
-  const initializeAudioContext = async () => {
-    if (
-      audioContextReadyRef.current &&
-      audioContextRef.current?.state !== "closed"
-    ) {
-      return;
-    }
-    try {
-      audioContextRef.current = new (window.AudioContext ||
-        window.webkitAudioContext)({
-          sampleRate: AUDIO_CONFIG.sampleRate,
-          latencyHint: "interactive",
-        });
-
-      // Create master gain node for volume control
-      masterGainRef.current = audioContextRef.current.createGain();
-      masterGainRef.current.connect(audioContextRef.current.destination);
-
-      // Create crossfade gain node for smooth transitions
-      crossfadeGainRef.current = audioContextRef.current.createGain();
-      crossfadeGainRef.current.connect(masterGainRef.current);
-
-      if (audioContextRef.current.state === "suspended") {
-        await audioContextRef.current.resume();
-      }
-
-      audioContextReadyRef.current = true;
-      addLog(
-        `Enhanced audio context ready (${audioContextRef.current.sampleRate}Hz)`,
-        "success"
-      );
-    } catch (error) {
-      addLog(`Audio context error: ${error.message}`, "error");
-    }
-  };
-
-  const isPCMFormat = (mimeType) => {
-    return (
-      mimeType && (mimeType.startsWith("audio/pcm") || mimeType.includes("pcm"))
-    );
-  };
-
-  // Simplified audio buffer creation with detailed logging
-  const createAudioBuffer = async (audioData, mimeType) => {
-    if (!audioContextRef.current) {
-      addLog("Audio context not initialized", "error");
-      return null;
-    }
-    let audioBuffer;
-    try {
-      if (isPCMFormat(mimeType)) {
-        const binaryString = atob(audioData);
-        const uint8Array = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          uint8Array[i] = binaryString.charCodeAt(i);
-        }
-        if (uint8Array.length % 2 !== 0) {
-          addLog("PCM data length is not even, possible corruption", "error");
-          return null;
-        }
-        const int16Array = new Int16Array(uint8Array.buffer);
-        addLog(
-          "PCM first 10 samples: " +
-          Array.from(int16Array.slice(0, 10)).join(", "),
-          "info"
-        );
-        addLog(
-          `PCM chunk length: ${int16Array.length}, expected sampleRate: ${AUDIO_CONFIG.sampleRate}`,
-          "info"
-        );
-        audioBuffer = audioContextRef.current.createBuffer(
-          1,
-          int16Array.length,
-          AUDIO_CONFIG.sampleRate
-        );
-        const channelData = audioBuffer.getChannelData(0);
-        for (let i = 0; i < int16Array.length; i++) {
-          channelData[i] = int16Array[i] / 32768.0;
-        }
-      } else {
-        const binaryString = atob(audioData);
-        const arrayBuffer = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          arrayBuffer[i] = binaryString.charCodeAt(i);
-        }
-        audioBuffer = await audioContextRef.current.decodeAudioData(
-          arrayBuffer.buffer
-        );
-      }
-      addLog(
-        `AudioBuffer created: duration=${audioBuffer.duration.toFixed(
-          3
-        )}s, sampleRate=${audioBuffer.sampleRate}, length=${audioBuffer.length
-        }`,
-        "info"
-      );
-      return audioBuffer;
-    } catch (err) {
-      addLog("createAudioBuffer error: " + err.message, "error");
-      return null;
-    }
-  };
-
-  // Robust streaming audio playback using Web Audio clock scheduling
-  const processAudioQueue = async () => {
-    if (!audioContextRef.current) return;
-    if (audioBufferRef.current.length === 0) return;
-
-    try {
-      if (audioContextRef.current.state === "suspended") {
-        await audioContextRef.current.resume();
-      }
-
-      while (audioBufferRef.current.length > 0) {
-        const chunk = audioBufferRef.current.shift();
-        setAudioQueueLength(audioBufferRef.current.length);
-
-        const audioBuffer = await createAudioBuffer(chunk.data, chunk.mimeType);
-        if (!audioBuffer) continue;
-
-        const source = audioContextRef.current.createBufferSource();
-        source.buffer = audioBuffer;
-
-        const destination = masterGainRef.current || audioContextRef.current.destination;
-        source.connect(destination);
-
-        const now = audioContextRef.current.currentTime;
-        // Schedule next chunk seamlessly right after the previous one
-        const startTime = Math.max(now, playbackStartTimeRef.current);
-        source.start(startTime);
-        playbackStartTimeRef.current = startTime + audioBuffer.duration;
-
-        isPlayingRef.current = true;
-        setIsPlaying(true);
-        scheduledSourcesRef.current.push(source);
-
-        source.onended = () => {
-          scheduledSourcesRef.current = scheduledSourcesRef.current.filter((s) => s !== source);
-          if (scheduledSourcesRef.current.length === 0 && audioBufferRef.current.length === 0) {
-            isPlayingRef.current = false;
-            setIsPlaying(false);
-            playbackStartTimeRef.current = 0;
-          }
-        };
-      }
-    } catch (error) {
-      addLog("Audio playback error: " + error.message, "error");
-    }
-  };
-
-  // Store last detected emotion for playback
-  const lastEmotionRef = useRef("");
-
-  // Audio queueing with emotion support
-  const queueAudio = async (audioData, mimeType, emotionTag) => {
-    if (!audioData || isMuted) return;
-    if (emotionTag && emotionTag !== lastEmotionRef.current) {
-      lastEmotionRef.current = emotionTag;
-      setEmotion((prev) => ({ ...prev, playback: emotionTag }));
-      addLog(`Emotion detected in audio: ${emotionTag}`, "ai-response");
-    }
-    audioBufferRef.current.push({
-      data: audioData,
-      mimeType: mimeType || "audio/pcm",
-      timestamp: Date.now(),
-      emotion: emotionTag || lastEmotionRef.current,
-    });
-    setAudioQueueLength(audioBufferRef.current.length);
-    processAudioQueue();
-  };
-
-  // Clean audio stopping
-  const stopCurrentAudio = () => {
-    scheduledSourcesRef.current.forEach((src) => {
-      try {
-        src.stop();
-      } catch (e) { }
-    });
-    scheduledSourcesRef.current = [];
-    playbackStartTimeRef.current = 0;
-    isPlayingRef.current = false;
-    setIsPlaying(false);
-  };
-
-  const clearAudioQueue = () => {
-    audioBufferRef.current = [];
-    stopCurrentAudio();
-    setAudioQueueLength(0);
-    addLog("Audio queue cleared", "info");
-  };
-
-  // Enhanced connection with better error handling
-  const connectToBackend = async () => {
-    setIsCalling(true);
-    setLog("");
-    setConnectionStatus("connecting");
-    if (!userProfile || Object.keys(userProfile).length === 0) {
-      setLog("User profile is missing or empty. Cannot start audio call.");
-      setConnectionStatus("error");
-      setIsCalling(false);
-      console.warn(
-        "GeminiAudioChatModal: userProfile is missing or empty",
-        userProfile
-      );
-      return;
-    }
-    if (!conversationHistory) {
-      setLog(
-        "Conversation history is missing or empty. Cannot start audio call."
-      );
-      setConnectionStatus("error");
-      setIsCalling(false);
-      console.warn(
-        "GeminiAudioChatModal: conversationHistory is missing or empty",
-        conversationHistory
-      );
-      return;
-    }
-    try {
-      wsRef.current = new window.WebSocket("ws://localhost:8000/audio");
-      wsRef.current.onopen = () => {
-        setConnectionStatus("connected");
-        setLog("Connected to audio backend. Sending setup...");
-        wsRef.current.send(
-          JSON.stringify({
-            type: "setup",
-            config: {
-              model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
-              response_modalities: ["AUDIO"],
-              voice_name: "Puck",
-              systemContext: {
-                user_profile: userProfile,
-                conversation_history: conversationHistory,
-              },
-              // VAD config removed: let Gemini handle VAD with defaults
-            },
-          })
-        );
-      };
-
-      wsRef.current.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          switch (data.type) {
-            case "setup_complete":
-              setLog("Audio session setup complete. You can now talk!");
-              break;
-
-            case "audio":
-              if (data.audio_data && !isMuted) {
-                // Pass emotion if present
-                queueAudio(
-                  data.audio_data,
-                  data.mime_type || "audio/pcm",
-                  data.emotion
-                );
-              }
-              break;
-
-            case "input_transcription":
-              currentInputTranscriptRef.current += data.text || "";
-              break;
-
-            case "output_transcription":
-              currentOutputTranscriptRef.current += data.text || "";
-              break;
-
-            case "turnComplete":
-              console.log("Turn Completed");
-              processAudioQueue();
-              const currentEmotion = emotionDetectionEnabled ? emotion.aggregated || "" : "";
-              (async () => {
-                if (currentInputTranscriptRef.current) {
-                  setInputTranscript(currentInputTranscriptRef.current);
-                  // Await distress score before saving message
-                  const distressScore = await analyzeDistressScore(currentInputTranscriptRef.current);
-                  const savedEmotion = recordingEmotionRef.current;
-                  console.log(savedEmotion);
-                  // Log emotion and distress before saving
-                  console.log("[saveMessage] User Emotion:", savedEmotion);
-                  console.log("[saveMessage] User Distress:", distressScore);
-                  addLog(`[saveMessage] User Emotion: ${savedEmotion}`, "info");
-                  addLog(`[saveMessage] User Distress: ${distressScore}`, "info");
-                  const inputDict = {
-                    sender: "user",
-                    type: "user",
-                    text: currentInputTranscriptRef.current,
-                    emotion: savedEmotion,
-                    distressScore: distressScore,
-                    timestamp: new Date().toISOString(),
-                  };
-                  const saveResult = await saveMessage(sessionId, inputDict);
-                  if (Array.isArray(conversationHistory)) {
-                    conversationHistory.push(inputDict);
-                  }
-                  if (saveResult) {
-                    addLog("User message saved successfully", "success");
-                  }
-                  currentInputTranscriptRef.current = "";
-                }
-                if (currentOutputTranscriptRef.current) {
-                  setOutputTranscript(currentOutputTranscriptRef.current);
-                  console.log("output:", outputTranscript);
-                  addLog(
-                    `[saveMessage] Model Output: ${outputTranscript}`,
-                    "info"
-                  );
-                  const outputDict = {
-                    sender: "bot",
-                    type: "model",
-                    text: currentOutputTranscriptRef.current,
-                    timestamp: new Date().toISOString(),
-                  };
-                  if (Array.isArray(conversationHistory)) {
-                    conversationHistory.push(outputDict);
-                  }
-                  const saveResult = await saveMessage(sessionId, outputDict);
-                  if (saveResult) {
-                    addLog("Model message saved successfully", "success");
-                  }
-                  currentOutputTranscriptRef.current = "";
-                }
-                addLog("Turn completed", "success");
-              })();
-              break;
-
-            case "error":
-              addLog(`Error: ${data.message}`, "error");
-              break;
-
-            default:
-              console.log("[unhandled message type]", data);
-              break;
-          }
-        } catch (error) {
-          addLog(`Message parsing error: ${error.message}`, "error");
-        }
-      };
-
-      wsRef.current.onerror = (error) => {
-        addLog("WebSocket error", "error");
-        setConnectionStatus("error");
-      };
-
-      wsRef.current.onclose = (event) => {
-        setIsConnected(false);
-        setConnectionStatus("disconnected");
-        addLog(
-          `Disconnected: ${event.reason || "Connection closed"}`,
-          "warning"
-        );
-        clearAudioQueue();
-      };
-    } catch (error) {
-      addLog(`Connection error: ${error.message}`, "error");
-      setConnectionStatus("error");
-    }
-  };
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem("token");
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  };
-  // Fixed saveMessage function
-  const saveMessage = async (sessionId, message) => {
-    try {
-      console.log("[saveMessage] Attempting to save:", message);
-      console.log("[saveMessage] Session ID:", sessionId);
-
-      const response = await fetch(
-        `${NODE_BACKEND_URL}/api/chat/sessions/${sessionId}/messages`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...getAuthHeaders(),
-          },
-          body: JSON.stringify(message),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(
-          `[saveMessage] Backend responded with status ${response.status}:`,
-          errorText
-        );
-        addLog(
-          `Failed to save message: ${response.status} - ${errorText}`,
-          "error"
-        );
-        return false;
-      }
-
-      const result = await response.json();
-      console.log("[saveMessage] Successfully saved:", result);
-      addLog("Message saved successfully", "success");
-      return true;
-    } catch (err) {
-      console.error("[saveMessage] Network/parsing error:", err);
-      addLog(`Save message error: ${err.message}`, "error");
-      return false;
-    }
-  };
-  const disconnect = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-
-    if (isRecording) {
-      stopRecording();
-    }
-
-    clearAudioQueue();
-  };
-
-  // Enhanced recording with better audio processing
-  const startRecording = async () => {
-    currentInputTranscriptRef.current = "";
-    currentOutputTranscriptRef.current = "";
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: 16000,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          latency: 0.01, // Low latency
-        },
-      });
-
-      streamRef.current = stream;
-
-      const inputAudioContext = new (window.AudioContext ||
-        window.webkitAudioContext)({
-          sampleRate: 16000,
-          latencyHint: "interactive",
-        });
-
-      const source = inputAudioContext.createMediaStreamSource(stream);
-      const processor = inputAudioContext.createScriptProcessor(2048, 1, 1); // Smaller buffer for lower latency
-
-      audioChunksRef.current = [];
-
-      processor.onaudioprocess = (event) => {
-        const channelData = event.inputBuffer.getChannelData(0);
-        audioChunksRef.current.push(new Float32Array(channelData));
-      };
-
-      source.connect(processor);
-      processor.connect(inputAudioContext.destination);
-
-      audioProcessorRef.current = {
-        context: inputAudioContext,
-        processor: processor,
-        source: source,
-      };
-
-      setIsRecording(true);
-      addLog("Recording started (16kHz, low latency)", "success");
-
-      // Auto-stop after 5 seconds
-      recordingTimeoutRef.current = setTimeout(() => {
-        if (isRecording) {
-          stopRecording();
-        }
-      }, 5000);
-    } catch (error) {
-      addLog(`Recording error: ${error.message}`, "error");
-    }
-  };
-
-  // Rest of the emotion detection logic remains the same...
+  // ── Lifecycle: initialise audio context, wire user-interaction resume ─────
   useEffect(() => {
-    if (!emotionDetectionEnabled) return;
-    let ws;
-    let interval;
-    let stream;
-    let isMounted = true;
+    initAudioContext();
 
-    // Open a dedicated WebSocket for emotion detection
-    ws = new WebSocket("ws://localhost:8000/frame");
-
-    ws.onopen = () => {
-      console.log("[Emotion] WebSocket connected");
-      ws.send(JSON.stringify({ setup: {} }));
-    };
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.emotion) {
-        setEmotion(data.emotion);
-        // console.log("[Emotion] Current:", data.emotion.current, "Aggregated:", data.emotion.aggregated);
-      } else if (data.setupComplete) {
-        console.log("[Emotion] Setup complete");
-      } else {
-        console.warn("[Emotion] Unknown message:", data);
-      }
-    };
-
-    ws.onerror = (err) => console.error("[Emotion] WebSocket error:", err);
-    ws.onclose = () => console.warn("[Emotion] WebSocket closed");
-
-    // Start webcam
-    navigator.mediaDevices
-      .getUserMedia({ video: true })
-      .then((mediaStream) => {
-        stream = mediaStream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-        }
-        interval = setInterval(() => {
-          if (!ws || ws.readyState !== WebSocket.OPEN) {
-            console.log("WebSocket not open");
-            return;
-          }
-          const canvas = canvasRef.current;
-          const video = videoRef.current;
-          if (!canvas) {
-            console.log("Canvas not available");
-            return;
-          }
-          if (!video) {
-            console.log("Video not available");
-            return;
-          }
-          if (canvas && video) {
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataURL = canvas.toDataURL("image/jpeg");
-            const base64 = dataURL.split(",")[1];
-            // console.log("Frame sent")
-            ws.send(JSON.stringify({ frame: base64 }));
-          }
-        }, 1000);
-      })
-      .catch((err) => console.error("[Emotion] Error accessing webcam:", err));
+    const resume = () => resumeIfSuspended();
+    document.addEventListener("click",   resume);
+    document.addEventListener("keydown", resume);
 
     return () => {
-      isMounted = false;
-      if (interval) clearInterval(interval);
-      if (ws) ws.close();
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-    };
-  }, [emotionDetectionEnabled]);
-
-  // Convert Float32Array to 16-bit PCM
-  const convertTo16BitPCM = (float32Array) => {
-    const int16Array = new Int16Array(float32Array.length);
-    for (let i = 0; i < float32Array.length; i++) {
-      // Clamp values to [-1, 1] and convert to 16-bit
-      const sample = Math.max(-1, Math.min(1, float32Array[i]));
-      int16Array[i] = sample * 32767; // Convert to 16-bit range
-    }
-    return int16Array;
-  };
-
-  // Convert 16-bit PCM to base64
-  const convertPCMToBase64 = (pcmData) => {
-    const uint8Array = new Uint8Array(pcmData.buffer);
-    let binary = "";
-    for (let i = 0; i < uint8Array.length; i++) {
-      binary += String.fromCharCode(uint8Array[i]);
-    }
-    return btoa(binary);
-  };
-
-  const recordingEmotionRef = useRef("");
-  const recordingDistressRef = useRef(0);
-
-  const stopRecording = async () => {
-    if (recordingTimeoutRef.current) {
-      clearTimeout(recordingTimeoutRef.current);
-      recordingTimeoutRef.current = null;
-    }
-
-    if (audioProcessorRef.current) {
-      try {
-        audioProcessorRef.current.processor.disconnect();
-        audioProcessorRef.current.source.disconnect();
-        audioProcessorRef.current.context.close();
-      } catch (error) { }
-    }
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    setIsRecording(false);
-
-    if (audioChunksRef.current.length > 0) {
-      let totalSamples = 0;
-      audioChunksRef.current.forEach((chunk) => {
-        totalSamples += chunk.length;
-      });
-
-      const combinedPCM = new Float32Array(totalSamples);
-      let offset = 0;
-      audioChunksRef.current.forEach((chunk) => {
-        combinedPCM.set(chunk, offset);
-        offset += chunk.length;
-      });
-
-      const currentEmotion = emotionDetectionEnabled
-        ? emotion.aggregated || ""
-        : "";
-      recordingEmotionRef.current = currentEmotion;
-
-      // Clean 16-bit PCM conversion (pure user voice, no silence or stalled TTS)
-      const userPCM16 = convertTo16BitPCM(combinedPCM);
-      const base64Data = convertPCMToBase64(userPCM16);
-
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const message = {
-          type: "audio_input",
-          audio_data: base64Data,
-          emotion: currentEmotion,
-          format: "pcm",
-          sample_rate: 16000,
-          channels: 1,
-          bits_per_sample: 16,
-        };
-        wsRef.current.send(JSON.stringify(message));
-        addLog(
-          `Audio sent (${(userPCM16.length / 16000).toFixed(
-            2
-          )}s)${currentEmotion ? ` with emotion: ${currentEmotion}` : ""}`,
-          "user-input"
-        );
-      }
-    }
-
-    audioChunksRef.current = [];
-    audioProcessorRef.current = null;
-  };
-
-  // Refactored: analyzeDistressScore returns the score
-  const analyzeDistressScore = async (inputText) => {
-    if (!inputText || inputText.trim() === "") return 0;
-    try {
-      const formattedHistory = (conversationHistory || []).map((msg) => ({
-        sender: msg.sender || '',
-        type: msg.type || '',
-        text: msg.text || msg.content || '',
-        timestamp: msg.timestamp || null,
-        emotion: msg.emotion || null,
-        distress: msg.distress || null,
-      }));
-      // Log the payload being sent to the distress score API
-      console.log("[Distress] Payload to API:", {
-        text: inputText,
-        conversationHistory: formattedHistory
-      });
-      console.log("[Distress] Endpoint:", `http://localhost:8000/api/distress-score`);
-      const response = await fetch('http://localhost:8000/api/distress-score', {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: inputText, conversationHistory: formattedHistory }),
-      });
-      if (!response.ok) throw new Error("API error");
-      const data = await response.json();
-      // Always update distress state
-      setDistress(data.score || 0);
-      // Show notification only if distress is high
-      if (typeof data.score === 'number' && data.score >= 7) {
-        notification.warning({
-          message: 'You may need support',
-          description: (
-            <div>
-              <div>Your distress score is high. Consider reaching out for help:</div>
-              <ul style={{ margin: '8px 0 0 0', padding: 0, listStyle: 'none' }}>
-                <li><a href="/helpline">Helpline Resources</a></li>
-                <li><a href="/therapists">Book a Therapist</a></li>
-                <li><a href="/relaxationtools">Relaxation Tools</a></li>
-              </ul>
-            </div>
-          ),
-          placement: 'topRight',
-          duration: 0,
-          style: { width: 340 },
-        });
-      }
-      setTimeout(() => {
-        console.log("[Distress] API response:", data); // Log full API response
-        console.log("[Distress] Distress score for message:", data.score);
-        console.log("[Distress] Emotion for message:", emotion.current);
-      }, 0);
-      return data.score || 0;
-    } catch (err) {
-      setDistress(0); // Reset distress on error
-      console.error("[Distress] Distress score analysis failed", err);
-      return 0;
-    }
-  };
-
-
-  const handleUserInteraction = async () => {
-    if (
-      audioContextRef.current &&
-      audioContextRef.current.state === "suspended"
-    ) {
-      await audioContextRef.current.resume();
-    }
-  };
-
-  useEffect(() => {
-    initializeAudioContext();
-
-    document.addEventListener("click", handleUserInteraction);
-    document.addEventListener("keydown", handleUserInteraction);
-
-    return () => {
-      document.removeEventListener("click", handleUserInteraction);
-      document.removeEventListener("keydown", handleUserInteraction);
-
-      if (recordingTimeoutRef.current) {
-        clearTimeout(recordingTimeoutRef.current);
-      }
-
-      if (audioProcessorRef.current) {
-        try {
-          audioProcessorRef.current.processor.disconnect();
-          audioProcessorRef.current.source.disconnect();
-          audioProcessorRef.current.context.close();
-        } catch (error) { }
-      }
-
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
-
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-
+      document.removeEventListener("click",   resume);
+      document.removeEventListener("keydown", resume);
+      cleanupRecorder();
+      disconnect();
       clearAudioQueue();
+      destroyAudioContext();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Reset & auto-connect when modal opens ────────────────────────────────
   useEffect(() => {
-    if (visible) {
-      // Reset connection state and logs
-      setIsCalling(false);
-      setIsConnected(false);
-      setIsRecording(false);
-      setIsMuted(false);
-      setConnectionStatus("disconnected");
-      setLogs([]);
-      setAudioQueueLength(0);
-      setIsPlaying(false);
-      setInputTranscript("");
-      setOutputTranscript("");
-      setDistress(0);
-      setLog("");
-      currentInputTranscriptRef.current = "";
-      currentOutputTranscriptRef.current = "";
-      // Optionally, re-initialize audio context if needed
-      initializeAudioContext();
-      // Connect to backend when modal opens
-      connectToBackend();
-    }
-    // No cleanup needed here; handled by other effects
+    if (!visible) return;
+    resetSession();
+    clearLogs();
+    setDistress(0);
+    initAudioContext();
+    connect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
-  const handleClose = () => {
-    // Disconnect Gemini audio session and clean up resources
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+
+  // ── Recording handlers ────────────────────────────────────────────────────
+
+  const handleStartRecording = useCallback(async () => {
+    const currentEmotion = emotionDetectionEnabled ? emotion.aggregated || "" : "";
+    await startRecording(currentEmotion, handleStopRecording);
+  }, [emotionDetectionEnabled, emotion, startRecording]);
+
+  const handleStopRecording = useCallback(async () => {
+    const result = await stopRecording();
+    if (result) {
+      sendAudio(result.base64Data, result.emotion);
     }
-    if (isRecording) {
-      stopRecording();
-    }
+  }, [stopRecording, sendAudio]);
+
+  // ── Modal close ───────────────────────────────────────────────────────────
+
+  const handleClose = useCallback(() => {
+    if (isRecording) handleStopRecording();
+    disconnect();
     clearAudioQueue();
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-      audioContextReadyRef.current = false;
-    }
-    if (onClose) onClose();
-    if (onAudioChatClose) onAudioChatClose(sessionId);
-  };
+    destroyAudioContext();
+    onClose?.();
+    onAudioChatClose?.(sessionId);
+  }, [isRecording, handleStopRecording, disconnect, clearAudioQueue, destroyAudioContext, onClose, onAudioChatClose, sessionId]);
+
+  // ==========================================================================
+  // Render
+  // ==========================================================================
   return (
     <Modal
       title="Gemini Audio Chat"
-      visible={visible}
+      open={visible}
       onCancel={handleClose}
       footer={[
-        <Button
-          key="close"
-          onClick={handleClose}
-          disabled={isCalling || isRecording}
-        >
+        <Button key="close" onClick={handleClose} disabled={isCalling || isRecording}>
           Close
         </Button>,
         <Button
@@ -890,15 +173,15 @@ const GeminiAudioChatModal = ({
           onClick={() => setEmotionDetectionEnabled((v) => !v)}
           type={emotionDetectionEnabled ? "primary" : "default"}
         >
-          {emotionDetectionEnabled
-            ? "Disable Emotion Detection"
-            : "Enable Emotion Detection"}
+          {emotionDetectionEnabled ? "Disable Emotion Detection" : "Enable Emotion Detection"}
         </Button>,
       ]}
       width={600}
     >
       <div style={{ textAlign: "center", padding: 20 }}>
         <p>Start a real-time audio conversation with the assistant.</p>
+
+        {/* Connection / error status bar */}
         {log && (
           <Alert
             message={log}
@@ -907,28 +190,23 @@ const GeminiAudioChatModal = ({
             style={{ marginTop: 10 }}
           />
         )}
+
+        {/* Mic toggle — enabled only when WS is connected */}
         <div style={{ margin: "16px 0" }}>
           <Button
             type={isRecording ? "primary" : "default"}
             icon={isRecording ? <MicOff /> : <Mic />}
-            onClick={isRecording ? stopRecording : startRecording}
+            onClick={isRecording ? handleStopRecording : handleStartRecording}
             disabled={connectionStatus !== "connected"}
             style={{ marginRight: 8 }}
           >
             {isRecording ? "Stop" : "Start"} Recording
           </Button>
         </div>
-        {/* Display finalized transcripts in a styled box */}
+
+        {/* Transcript display */}
         {(inputTranscript || outputTranscript) && (
-          <div
-            style={{
-              margin: "16px 0",
-              textAlign: "left",
-              background: "#f6f6f6",
-              borderRadius: 8,
-              padding: 12,
-            }}
-          >
+          <div style={{ margin: "16px 0", textAlign: "left", background: "#f6f6f6", borderRadius: 8, padding: 12 }}>
             {inputTranscript && (
               <div style={{ marginBottom: 6 }}>
                 <b>You:</b>{" "}
@@ -943,6 +221,8 @@ const GeminiAudioChatModal = ({
             )}
           </div>
         )}
+
+        {/* Emotion detection panel */}
         {emotionDetectionEnabled && (
           <div style={{ marginTop: 20, textAlign: "left" }}>
             <b>Detected Emotion:</b>{" "}
@@ -953,20 +233,9 @@ const GeminiAudioChatModal = ({
                 <b>Playback Emotion:</b> {emotion.playback}
               </span>
             )}
-            <video
-              ref={videoRef}
-              style={{ display: "none" }}
-              autoPlay
-              playsInline
-              width={128}
-              height={96}
-            />
-            <canvas
-              ref={canvasRef}
-              style={{ display: "none" }}
-              width={128}
-              height={96}
-            />
+            {/* Hidden webcam elements — managed by useEmotionDetection */}
+            <video ref={videoRef} style={{ display: "none" }} autoPlay playsInline width={128} height={96} />
+            <canvas ref={canvasRef} style={{ display: "none" }} width={128} height={96} />
           </div>
         )}
       </div>
