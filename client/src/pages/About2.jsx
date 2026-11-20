@@ -1,44 +1,7 @@
 import React from 'react';
-import { useState } from 'react';
-import { Canvas } from "@react-three/fiber";
-import DarkForest from "../models/DarkForest.jsx";
 import Footer from "../components/Footer.jsx";
 
 const AboutUsPage = () => {
-    const [currentStage, setCurrentStage] = useState(1);
-    const [isRotating, setIsRotating] = useState(false);
-    const [isPlayingMusic, setIsPlayingMusic] = useState(false);
-    
-    const adjustBiplaneForScreenSize = () => {
-        let screenScale, screenPosition;
-    
-        if (window.innerWidth < 768) {
-          screenScale = [1.5, 1.5, 1.5];
-          screenPosition = [0, -1.5, 0];
-        } else {
-          screenScale = [3, 3, 3];
-          screenPosition = [0, -4, -4];
-        }
-    
-        return [screenScale, screenPosition];
-    };
-    
-    const adjustIslandForScreenSize = () => {
-        let screenScale, screenPosition;
-    
-        if (window.innerWidth < 768) {
-          screenScale = [0.9, 0.9, 0.9];
-          screenPosition = [0, -6.5, -43.4];
-        } else {
-          screenScale = [1, 1, 1];
-          screenPosition = [0, -6.5, -43.4];
-        }
-    
-        return [screenScale, screenPosition];
-    };
-    
-    const [biplaneScale, biplanePosition] = adjustBiplaneForScreenSize();
-    const [islandScale, islandPosition] = adjustIslandForScreenSize();
     
     // Function to handle PDF download (you'll need to replace with actual PDF path)
     const handleDownloadPDF = () => {
@@ -75,21 +38,16 @@ const AboutUsPage = () => {
                         </p>
                     </div>
                     
-                    <div className="w-full md:w-1/3">
-                        <Canvas
-                            className={`bg-transparent ${isRotating ? "cursor-grabbing" : "cursor-grab"}`}
-                            style={{ height: "50vh", width: "100%" }}
-                            camera={{ near: 0.1, far: 1000 }}
-                        >
-                            <DarkForest
-                                isRotating={isRotating}
-                                setIsRotating={setIsRotating}
-                                setCurrentStage={setCurrentStage}
-                                position={islandPosition}
-                                rotation={[0.1, 4.7077, 0]}
-                                scale={islandScale}
-                            />
-                        </Canvas>
+                    <div className="w-full md:w-1/3 flex justify-center">
+                        <div className="w-full max-w-sm p-6 rounded-2xl bg-gradient-to-br from-[#ffb6d5]/30 to-[#edf9ff] border border-pink-100 shadow-sm text-center">
+                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-pink-100 flex items-center justify-center text-2xl">
+                                🌸
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-800 mb-2">Empathetic Innovation</h3>
+                            <p className="text-sm text-gray-600">
+                                Combining emotional intelligence with digital privacy to provide round-the-clock sanctuary and care.
+                            </p>
+                        </div>
                     </div>
                 </div>
 
@@ -112,7 +70,7 @@ const AboutUsPage = () => {
                         </li>
                         <li className="flex items-start">
                             <span className="text-blue-500 mr-2">•</span>
-                            <span>Interactive 3D avatar companion</span>
+                            <span>AI-powered emotional companion</span>
                         </li>
                         <li className="flex items-start">
                             <span className="text-blue-500 mr-2">•</span>
@@ -128,7 +86,7 @@ const AboutUsPage = () => {
                         </li>
                         <li className="flex items-start">
                             <span className="text-blue-500 mr-2">•</span>
-                            <span>Blockchain-secured appointment booking</span>
+                            <span>Confidential appointment booking</span>
                         </li>
                         <li className="flex items-start">
                             <span className="text-blue-500 mr-2">•</span>

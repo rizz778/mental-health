@@ -1,147 +1,81 @@
-
-import { Suspense, useEffect, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { useEffect, useRef, useState } from "react";
 import sakura from "../assets/sakura.mp3";
 import HomeInfo from "../components/HomeInfo";
 import { soundoff, soundon } from "../assets/icons";
-// import Butterfly from "../models/Butterfly.jsx";
-import DarkForest from "../models/DarkForest.jsx";
-import EnchantedForest from "../models/EnchantedForest";
-import Forest from "../models/Forest";
 import Testimonials from "../components/Testimonials.jsx";
-import pinkBg from "../assets/images/pink-bg.jpg";
 import Benefits from "../components/Benefits.jsx";
 import Faq from "../components/Faq.jsx";
 import BuyToken from "./BuyToken.jsx";
 import Footer from "../components/Footer.jsx";
-const Home = () => {
-  const audioRef = useRef(new Audio(sakura));
-  audioRef.current.volume = 0.4;
-  audioRef.current.loop = true;
 
-  const [currentStage, setCurrentStage] = useState(1);
-  const [isRotating, setIsRotating] = useState(false);
+const Home = () => {
+  const audioRef = useRef(null);
   const [isPlayingMusic, setIsPlayingMusic] = useState(false);
 
   useEffect(() => {
     if (isPlayingMusic) {
-      audioRef.current.play();
+      if (!audioRef.current) {
+        audioRef.current = new Audio(sakura);
+        audioRef.current.volume = 0.4;
+        audioRef.current.loop = true;
+      }
+      audioRef.current.play().catch(() => {});
+    } else if (audioRef.current) {
+      audioRef.current.pause();
     }
 
     return () => {
-      audioRef.current.pause();
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
     };
   }, [isPlayingMusic]);
 
-  const adjustBiplaneForScreenSize = () => {
-    let screenScale, screenPosition;
-
-    // If screen width is less than 768px, adjust the scale and position
-    if (window.innerWidth < 768) {
-      screenScale = [1.5, 1.5, 1.5];
-      screenPosition = [0, -1.5, 0];
-    } else {
-      screenScale = [3, 3, 3];
-      screenPosition = [0, -4, -4];
-    }
-
-    return [screenScale, screenPosition];
-  };
-
-  const adjustIslandForScreenSize = () => {
-    let screenScale, screenPosition;
-
-    if (window.innerWidth < 768) {
-      screenScale = [0.9, 0.9, 0.9];
-      screenPosition = [0, -6.5, -43.4];
-    } else {
-      screenScale = [1, 1, 1];
-      screenPosition = [0, -6.5, -43.4];
-    }
-
-    return [screenScale, screenPosition];
-  };
-
-  const [biplaneScale, biplanePosition] = adjustBiplaneForScreenSize();
-  const [islandScale, islandPosition] = adjustIslandForScreenSize();
-
   return (
-    <section 
-    className='w-full h-screen relative '
-    >
-      <div className='absolute top-28 left-0 right-0 z-10 flex items-center justify-center'>
-        {currentStage && <HomeInfo currentStage={currentStage} />}
+    <section className="w-full relative overflow-hidden">
+      {/* Lightweight Ambient Hero Section (Zero 3D/WebGL overhead) */}
+      <div className="w-full min-h-screen relative flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[#ffb6d5] via-[#ffd1e3] to-[#edf9ff]">
+        {/* Soft, Calming Ambient Glowing Orbs in CSS */}
+        <div className="absolute -top-24 -left-24 w-96 h-96 bg-[#ff70a6]/25 rounded-full blur-3xl pointer-events-none animate-pulse" />
+        <div className="absolute top-1/4 -right-24 w-[28rem] h-[28rem] bg-[#70d6ff]/25 rounded-full blur-3xl pointer-events-none animate-pulse [animation-delay:2s]" />
+        <div className="absolute -bottom-24 left-1/3 w-[32rem] h-[32rem] bg-[#e7c6ff]/35 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Hero Card */}
+        <div className="relative z-10 flex items-center justify-center px-4">
+          <HomeInfo />
+        </div>
+
+        {/* Audio Toggle */}
+        <div className="absolute bottom-6 left-6 z-20">
+          <img
+            src={!isPlayingMusic ? soundoff : soundon}
+            alt="Toggle Music"
+            onClick={() => setIsPlayingMusic((prev) => !prev)}
+            className="w-10 h-10 cursor-pointer object-contain hover:scale-110 transition-transform drop-shadow"
+            title={isPlayingMusic ? "Mute music" : "Play calming music"}
+          />
+        </div>
       </div>
 
-      <Canvas
-        className={`w-full h-screen bg-transparent ${
-          isRotating ? "cursor-grabbing" : "cursor-grab"
-        }`}
-        camera={{ near: 0.1, far: 1000 }}
-      >
-        {/* <Suspense fallback={<Loader />}>
-          <directionalLight position={[1, 1, 1]} intensity={2} />
-          <ambientLight intensity={0.5} />
-          <pointLight position={[10, 5, 10]} intensity={2} />
-          <spotLight
-            position={[0, 50, 10]}
-            angle={0.15}
-            penumbra={1}
-            intensity={2}
-          />
-          <hemisphereLight
-            skyColor='#b1e1ff'
-            groundColor='#000000'
-            intensity={1}
-          /> */}
-
-          {/* <Butterfly /> */}
-          {/* <Sky isRotating={isRotating} /> */}
-          <Forest
-            isRotating={isRotating}
-            setIsRotating={setIsRotating}
-            setCurrentStage={setCurrentStage}
-            position={islandPosition}
-            rotation={[0.1, 4.7077, 0]}
-            scale={islandScale}
-          />
-          {/* <Plane
-            isRotating={isRotating}
-            position={biplanePosition}
-            rotation={[0, 20.1, 0]}
-            scale={biplaneScale}
-          /> */}
-        {/* </Suspense> */}
-      </Canvas>
-
-      <div className='absolute bottom-2 left-2'>
-        <img
-          src={!isPlayingMusic ? soundoff : soundon}
-          alt='jukebox'
-          onClick={() => setIsPlayingMusic(!isPlayingMusic)}
-          className='w-10 h-10 cursor-pointer object-contain'
-        />
-      </div>
       <div className="sections">
-      <div 
-  className="testimonial-section" 
-  // style={{ backgroundImage: `url(${pinkBg})`, }}
->
-   <Testimonials />
-</div>
-<div className="benefits-section flex justify-center items-center min-h-screen">
-  <Benefits />
-</div>
-</div>
-<div className="faq-section">
-  <Faq />
-</div>
-<div className="pricing-section">
-  <BuyToken />
-</div>
-<Footer/>
+        <div className="testimonial-section">
+          <Testimonials />
+        </div>
+        <div className="benefits-section flex justify-center items-center min-h-screen">
+          <Benefits />
+        </div>
+      </div>
 
-</section>
+      <div className="faq-section">
+        <Faq />
+      </div>
+
+      <div className="pricing-section">
+        <BuyToken />
+      </div>
+
+      <Footer />
+    </section>
   );
 };
 

@@ -1,318 +1,250 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import BlockchainService from './BlockchainService';
-import { ethers } from 'ethers';
+
+const initialTherapists = [
+  {
+    id: 1,
+    name: "Dr. Hrithik Khandelwal",
+    specialization: "Anxiety, Depression, Post Traumatic Stress Disorders",
+    hourlyRate: 1500,
+  },
+  {
+    id: 2,
+    name: "Dr. Smita Chauhan",
+    specialization: "Trauma, Panic Disorders, Grief Counseling",
+    hourlyRate: 1800,
+  },
+  {
+    id: 3,
+    name: "Dr. Ritika Hemrajani",
+    specialization: "Relationship Issues, Family Therapy",
+    hourlyRate: 1600,
+  },
+  {
+    id: 4,
+    name: "Dr. Rohit Saxena",
+    specialization: "Parenting Issues, Daily Life Issues",
+    hourlyRate: 1400,
+  },
+];
 
 const TherapistBookingPage = () => {
-  const [therapists, setTherapists] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [therapists] = useState(initialTherapists);
   const [selectedTherapist, setSelectedTherapist] = useState(null);
   const [selectedDate, setSelectedDate] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
-  const [bookingStatus, setBookingStatus] = useState(null);
-  const [userAppointments, setUserAppointments] = useState([]);
-  const [showAppointments, setShowAppointments] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [userAppointments, setUserAppointments] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sentio_appointments');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
-    async function initializeBlockchain() {
-      try {
-        const initialized = await BlockchainService.initialize();
-        if (initialized) {
-          setConnectionStatus('Connected');
-          loadTherapists();
-        } else {
-          setConnectionStatus('Connection Failed');
-          // Not showing error message in UI
-        }
-      } catch (err) {
-        console.error('Blockchain initialization error:', err);
-        setConnectionStatus('Connection Error');
-        // Not showing error message in UI
-        setLoading(false);
-      }
-    }
-
-    initializeBlockchain();
-  }, []);
-
-  const loadTherapists = async () => {
     try {
-      setLoading(true);
-      const therapistList = await BlockchainService.getAllTherapists();
-      setTherapists(therapistList);
-      setLoading(false);
-    } catch (err) {
-      console.error('Error loading therapists:', err);
-      // Not showing error message in UI
-      setLoading(false);
+      localStorage.setItem('sentio_appointments', JSON.stringify(userAppointments));
+    } catch (e) {
+      console.error('Failed to save appointments:', e);
     }
-  };
-
-  const loadUserAppointments = async () => {
-    try {
-      setLoading(true);
-      const appointments = await BlockchainService.getClientAppointments();
-      setUserAppointments(appointments);
-      setShowAppointments(true);
-      setLoading(false);
-    } catch (err) {
-      console.error('Error loading appointments:', err);
-      // Not showing error message in UI
-      setLoading(false);
-    }
-  };
+  }, [userAppointments]);
 
   const handleTherapistSelect = (therapist) => {
     setSelectedTherapist(therapist);
-    setBookingStatus(null);
+    setSuccessMessage('');
   };
 
-  const handleBookAppointment = async (e) => {
+  const handleBookAppointment = (e) => {
     e.preventDefault();
-    
+
     if (!selectedTherapist || !selectedDate || !startTime || !endTime) {
-      // Not showing validation errors in UI
       return;
     }
 
-    try {
-      setLoading(true);
-      setBookingStatus(null);
+    const startDateTime = new Date(`${selectedDate}T${startTime}`);
+    const endDateTime = new Date(`${selectedDate}T${endTime}`);
 
-      // Convert date and times to timestamps
-      const startDateTime = new Date(`${selectedDate}T${startTime}`);
-      const endDateTime = new Date(`${selectedDate}T${endTime}`);
-      
-      if (startDateTime >= endDateTime) {
-        // Not showing validation errors in UI
-        setLoading(false);
-        return;
-      }
-
-      const startTimestamp = Math.floor(startDateTime.getTime() / 1000);
-      const endTimestamp = Math.floor(endDateTime.getTime() / 1000);
-
-      const txHash = await BlockchainService.bookAppointment(
-        selectedTherapist.id,
-        startTimestamp,
-        endTimestamp
-      );
-
-      // Reset form but don't show success message
-      setSelectedDate('');
-      setStartTime('');
-      setEndTime('');
-      
-      // Reload user appointments
-      await loadUserAppointments();
-      
-    } catch (err) {
-      console.error('Booking error:', err);
-      // Not showing error message in UI
-    } finally {
-      setLoading(false);
+    if (startDateTime >= endDateTime) {
+      alert("End time must be after start time");
+      return;
     }
+
+    const newAppointment = {
+      id: Date.now(),
+      therapistId: selectedTherapist.id,
+      therapistName: selectedTherapist.name,
+      specialization: selectedTherapist.specialization,
+      date: selectedDate,
+      startTime: `${selectedDate}T${startTime}`,
+      endTime: `${selectedDate}T${endTime}`,
+      isCancelled: false,
+      bookedAt: new Date().toISOString(),
+    };
+
+    setUserAppointments((prev) => [newAppointment, ...prev]);
+    setSuccessMessage(`Appointment booked successfully with ${selectedTherapist.name}!`);
+    setSelectedDate('');
+    setStartTime('');
+    setEndTime('');
   };
 
-  const handleCancelAppointment = async (appointmentId) => {
-    try {
-      setLoading(true);
-      const txHash = await BlockchainService.cancelAppointment(appointmentId);
-      
-      // No success message shown
-      
-      // Reload appointments
-      await loadUserAppointments();
-    } catch (err) {
-      console.error('Cancellation error:', err);
-      // Not showing error message in UI
-    } finally {
-      setLoading(false);
-    }
+  const handleCancelAppointment = (appointmentId) => {
+    setUserAppointments((prev) =>
+      prev.map((app) => (app.id === appointmentId ? { ...app, isCancelled: true } : app))
+    );
   };
 
-  // Format date for the input element
-  const formatDateForInput = (date) => {
-    return format(date, 'yyyy-MM-dd');
-  };
-
-  // Get today's date in the format for the date input min attribute
-  const today = formatDateForInput(new Date());
+  const today = format(new Date(), 'yyyy-MM-dd');
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">Therapist Booking System</h1>
-      
-      <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-        <p className="text-lg">
-          Blockchain Connection Status: <span className={`font-bold ${connectionStatus === 'Connected' ? 'text-green-600' : 'text-red-600'}`}>
-            {connectionStatus}
-          </span>
-        </p>
-      </div>
-      
-      {/* Error messages removed */}
-      
-      {/* Status messages removed */}
+    <div className="container mx-auto px-4 py-8 max-w-6xl">
+      <h1 className="text-3xl font-bold mb-6 text-gray-800">Therapist Booking System</h1>
+
+      {successMessage && (
+        <div className="mb-6 p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
+          {successMessage}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Left Column - Therapist List */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold mb-4">Available Therapists</h2>
-          
-          {loading && therapists.length === 0 ? (
-            <p className="text-gray-600">Loading therapists...</p>
-          ) : therapists.length > 0 ? (
-            <ul className="divide-y divide-gray-200">
-              {therapists.map((therapist) => (
-                <li 
-                  key={therapist.id}
-                  className={`py-4 cursor-pointer hover:bg-gray-50 ${selectedTherapist?.id === therapist.id ? 'bg-blue-50' : ''}`}
-                  onClick={() => handleTherapistSelect(therapist)}
-                >
-                  <h3 className="text-lg font-medium">{therapist.name}</h3>
-                  <p className="text-gray-600">{therapist.specialization}</p>
-                  <p className="text-gray-800 font-medium mt-1">{therapist.hourlyRate} ETH/hour</p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-gray-600">No therapists available.</p>
-          )}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-xl font-semibold mb-4 text-gray-800">Available Therapists</h2>
+          <ul className="divide-y divide-gray-100">
+            {therapists.map((therapist) => (
+              <li
+                key={therapist.id}
+                className={`py-4 px-3 rounded-lg cursor-pointer transition-colors ${
+                  selectedTherapist?.id === therapist.id
+                    ? 'bg-pink-50 border border-pink-200'
+                    : 'hover:bg-gray-50'
+                }`}
+                onClick={() => handleTherapistSelect(therapist)}
+              >
+                <h3 className="text-lg font-medium text-gray-900">{therapist.name}</h3>
+                <p className="text-sm text-gray-600">{therapist.specialization}</p>
+                <p className="text-sm font-semibold text-pink-600 mt-1">₹{therapist.hourlyRate} / hour</p>
+              </li>
+            ))}
+          </ul>
         </div>
-        
+
         {/* Middle Column - Booking Form */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold mb-4">Book an Appointment</h2>
-          
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-xl font-semibold mb-4 text-gray-800">Book an Appointment</h2>
+
           {selectedTherapist ? (
-            <form onSubmit={handleBookAppointment}>
-              <div className="mb-4">
-                <p className="font-medium">Selected Therapist:</p>
-                <p>{selectedTherapist.name} - {selectedTherapist.specialization}</p>
-                <p className="font-medium mt-1">{selectedTherapist.hourlyRate} ETH/hour</p>
+            <form onSubmit={handleBookAppointment} className="space-y-4">
+              <div className="p-3 bg-pink-50/50 rounded-lg border border-pink-100">
+                <p className="text-xs text-gray-500 uppercase font-medium">Selected Specialist</p>
+                <p className="font-semibold text-gray-900">{selectedTherapist.name}</p>
+                <p className="text-sm text-pink-600 font-medium">₹{selectedTherapist.hourlyRate} / hour</p>
               </div>
-              
-              <div className="mb-4">
-                <label className="block text-gray-700 mb-2">Date:</label>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
                 <input
                   type="date"
                   min={today}
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded"
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:outline-none"
                   required
                 />
               </div>
-              
-              <div className="mb-4">
-                <label className="block text-gray-700 mb-2">Start Time:</label>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
                 <input
                   type="time"
                   value={startTime}
                   onChange={(e) => setStartTime(e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded"
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:outline-none"
                   required
                 />
               </div>
-              
-              <div className="mb-4">
-                <label className="block text-gray-700 mb-2">End Time:</label>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
                 <input
                   type="time"
                   value={endTime}
                   onChange={(e) => setEndTime(e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded"
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:outline-none"
                   required
                 />
               </div>
-              
+
               {startTime && endTime && selectedDate && (
-                <div className="mb-4 p-3 bg-blue-50 rounded">
-                  <p className="font-medium">Estimated Cost:</p>
+                <div className="p-3 bg-gray-50 rounded-lg text-sm">
+                  <span className="text-gray-500">Estimated Total: </span>
                   {(() => {
                     try {
                       const start = new Date(`${selectedDate}T${startTime}`);
                       const end = new Date(`${selectedDate}T${endTime}`);
-                      const hours = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60)));
-                      const rate = parseFloat(selectedTherapist.hourlyRate);
-                      const totalCost = hours * rate;
-                      return <p>{totalCost.toFixed(6)} ETH</p>;
-                    } catch (err) {
-                      return <p>Please select valid times</p>;
+                      const hours = Math.max(1, (end - start) / (1000 * 60 * 60));
+                      const total = hours * selectedTherapist.hourlyRate;
+                      return <span className="font-bold text-gray-900">₹{Math.round(total)}</span>;
+                    } catch {
+                      return <span>Select valid times</span>;
                     }
                   })()}
                 </div>
               )}
-              
+
               <button
                 type="submit"
-                disabled={loading}
-                className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 disabled:bg-blue-400"
+                className="w-full bg-[#f64a8a] hover:bg-pink-600 text-white font-medium py-2 px-4 rounded-lg transition-colors shadow-sm"
               >
-                {loading ? 'Processing...' : 'Book Appointment'}
+                Confirm Booking
               </button>
             </form>
           ) : (
-            <p className="text-gray-600">Please select a therapist to book an appointment.</p>
+            <p className="text-gray-500 text-sm">Please select a therapist from the left to book.</p>
           )}
         </div>
-        
+
         {/* Right Column - User's Appointments */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold mb-4">Your Appointments</h2>
-          
-          {!showAppointments ? (
-            <button
-              onClick={loadUserAppointments}
-              disabled={loading}
-              className="w-full bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 disabled:bg-green-400 mb-4"
-            >
-              {loading ? 'Loading...' : 'Show My Appointments'}
-            </button>
-          ) : loading ? (
-            <p className="text-gray-600">Loading your appointments...</p>
-          ) : userAppointments.length > 0 ? (
-            <ul className="divide-y divide-gray-200">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-xl font-semibold mb-4 text-gray-800">Your Appointments</h2>
+
+          {userAppointments.length > 0 ? (
+            <ul className="divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
               {userAppointments.map((appointment) => (
-                <li key={appointment.id} className="py-4">
-                  <h3 className="text-lg font-medium">{appointment.therapistName}</h3>
-                  <p className="text-gray-600">
-                    {format(new Date(appointment.startTime), 'MMM dd, yyyy')}
-                  </p>
-                  <p className="text-gray-600">
-                    {format(new Date(appointment.startTime), 'h:mm a')} - 
+                <li key={appointment.id} className="py-3">
+                  <h3 className="font-medium text-gray-900">{appointment.therapistName}</h3>
+                  <p className="text-xs text-gray-500">
+                    {format(new Date(appointment.startTime), 'MMM dd, yyyy')} |{' '}
+                    {format(new Date(appointment.startTime), 'h:mm a')} -{' '}
                     {format(new Date(appointment.endTime), 'h:mm a')}
                   </p>
-                  <p className={`${appointment.isCancelled ? 'text-red-600' : 'text-green-600'} font-medium`}>
-                    {appointment.isCancelled ? 'Cancelled' : 'Active'}
-                  </p>
-                  
-                  {!appointment.isCancelled && (
-                    <button
-                      onClick={() => handleCancelAppointment(appointment.id)}
-                      className="mt-2 bg-red-600 text-white py-1 px-3 rounded hover:bg-red-700 text-sm"
+                  <div className="flex items-center justify-between mt-2">
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        appointment.isCancelled
+                          ? 'bg-red-50 text-red-600'
+                          : 'bg-green-50 text-green-600'
+                      }`}
                     >
-                      Cancel
-                    </button>
-                  )}
+                      {appointment.isCancelled ? 'Cancelled' : 'Confirmed'}
+                    </span>
+                    {!appointment.isCancelled && (
+                      <button
+                        onClick={() => handleCancelAppointment(appointment.id)}
+                        className="text-xs text-red-500 hover:text-red-700 underline"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-gray-600">You don't have any appointments yet.</p>
-          )}
-          
-          {showAppointments && (
-            <button
-              onClick={loadUserAppointments}
-              className="mt-4 w-full bg-gray-200 text-gray-800 py-2 px-4 rounded hover:bg-gray-300"
-            >
-              Refresh Appointments
-            </button>
+            <p className="text-gray-500 text-sm">You have no booked appointments yet.</p>
           )}
         </div>
       </div>

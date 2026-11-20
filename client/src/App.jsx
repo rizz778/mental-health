@@ -1,69 +1,67 @@
-import React, { useEffect } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import Home from "./pages/Home";
-import ChatPage from "./pages/ChatPage";
-import BuyToken from "./pages/BuyToken";
-import Login from "./pages/Login";
-import Signup from "./pages/SignUp";
-import "regenerator-runtime/runtime";
+import React, { Suspense, lazy } from "react";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
-import TestPage from "./components/TestPage.jsx";
-import About2 from "./pages/About2.jsx";
-import AvatarExperience from "./pages/AvatarExperience";
 import "./App.css";
-import "@fortawesome/fontawesome-free/css/all.min.css";
-import Resource from "./pages/Resource.jsx";
-import Helpline from "./pages/Helpline.jsx";
-import SelfAssessment from "./pages/SelfAssessment.jsx";
-import Therapists from "./pages/Therapists.jsx";
-import RelaxationToolsPage from "./pages/RelaxationToolsPage.jsx";
-import CommunityForum from "./pages/CommunityForum.jsx";
-import TherapistBookingPage from "./pages/TherapistBookingPage.jsx";
-import TabPage from "./pages/TabPage.jsx";
-import TwoTabPage from "./pages/TwoTabPage.jsx";
-import ProfilePage from "./pages/ProfilePage.jsx";
-import Dashboard from "./components/Dashboard.jsx"
+
+// Lazy-loaded pages (Code Splitting for fast startup and lightweight memory)
+const Home = lazy(() => import("./pages/Home"));
+const ChatPage = lazy(() => import("./pages/ChatPage"));
+const Login = lazy(() => import("./pages/Login"));
+const Signup = lazy(() => import("./pages/SignUp"));
+const Resource = lazy(() => import("./pages/Resource.jsx"));
+const About2 = lazy(() => import("./pages/About2.jsx"));
+const Helpline = lazy(() => import("./pages/Helpline.jsx"));
+const SelfAssessment = lazy(() => import("./pages/SelfAssessment.jsx"));
+const TestPage = lazy(() => import("./components/TestPage.jsx"));
+const Therapists = lazy(() => import("./pages/Therapists.jsx"));
+const TherapistBookingPage = lazy(() => import("./pages/TherapistBookingPage.jsx"));
+const RelaxationToolsPage = lazy(() => import("./pages/RelaxationToolsPage.jsx"));
+const CommunityForum = lazy(() => import("./pages/CommunityForum.jsx"));
+const TabPage = lazy(() => import("./pages/TabPage.jsx"));
+const TwoTabPage = lazy(() => import("./pages/TwoTabPage.jsx"));
+const ProfilePage = lazy(() => import("./pages/ProfilePage.jsx"));
+const Dashboard = lazy(() => import("./components/Dashboard.jsx"));
+const BuyToken = lazy(() => import("./pages/BuyToken.jsx"));
+
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-[70vh] w-full">
+    <div className="w-10 h-10 border-4 border-pink-200 border-t-[#f64a8a] rounded-full animate-spin" />
+  </div>
+);
+
 function App() {
-  const location = useLocation();
   const isAuthenticated = true;
 
-  // Apply the gradient background if on /token page
-  useEffect(() => {
-    if (location.pathname === "/token") {
-      document.body.style.backgroundColor = " #ff92be";
-    } else {
-      document.body.style.background = ""; // Reset to default
-    }
-  }, [location]);
-
   return (
-    <div>
+    <div className="min-h-screen flex flex-col">
       <Navbar />
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/" element={<Home />} />
-        <Route path="/login" element={isAuthenticated ? <Navigate to="/chat" /> : <Login />} />
-        <Route path="/signup" element={isAuthenticated ? <Navigate to="/chat" /> : <Signup />} />
-        <Route path="/resource" element={<Resource />} />
-        <Route path="/about" element={<About2 />} />
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<Home />} />
+          <Route path="/login" element={isAuthenticated ? <Navigate to="/chat" /> : <Login />} />
+          <Route path="/signup" element={isAuthenticated ? <Navigate to="/chat" /> : <Signup />} />
+          <Route path="/resource" element={<Resource />} />
+          <Route path="/about" element={<About2 />} />
 
-        {/* Protected Routes */}
-        <Route path="/token" element={isAuthenticated ? <BuyToken /> : <Navigate to="/login" />} />
-        <Route path="/avatarexp" element={isAuthenticated ? <AvatarExperience /> : <Navigate to="/login" />} />
-        <Route path="/helpline" element={isAuthenticated ? <Helpline /> : <Navigate to="/login" />} />
-        <Route path="/selfassessment" element={isAuthenticated ? <SelfAssessment /> : <Navigate to="/login" />} />
-        <Route path="/test/depression" element={isAuthenticated ? <TestPage /> : <Navigate to="/login" />} />
-        <Route path="/therapists" element={isAuthenticated ? <Therapists /> : <Navigate to="/login" />} />
-        <Route path="/therapist_booking" element={isAuthenticated ? <TherapistBookingPage /> : <Navigate to="/login" />} />
-        <Route path="/relaxationtools" element={isAuthenticated ? <RelaxationToolsPage /> : <Navigate to="/login" />} />
-        <Route path="/communityforum" element={isAuthenticated ? <CommunityForum /> : <Navigate to="/login" />} />
-        <Route path="/tabpage" element={isAuthenticated ? <TabPage /> : <Navigate to="/login" />} />
-        <Route path="/twotabpage" element={isAuthenticated ? <TwoTabPage /> : <Navigate to="/login" />} />
-        <Route path="/chat" element={isAuthenticated ? <ChatPage /> : <Navigate to="/login" />} />
-        <Route path="/profile" element={isAuthenticated ? <ProfilePage /> : <Navigate to="/login" />} />
-        <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/dashboard" />} />
-
-      </Routes>
+          {/* Protected Routes */}
+          <Route path="/pricing" element={isAuthenticated ? <BuyToken /> : <Navigate to="/login" />} />
+          <Route path="/token" element={<Navigate to="/pricing" replace />} />
+          <Route path="/avatarexp" element={<Navigate to="/" replace />} />
+          <Route path="/helpline" element={isAuthenticated ? <Helpline /> : <Navigate to="/login" />} />
+          <Route path="/selfassessment" element={isAuthenticated ? <SelfAssessment /> : <Navigate to="/login" />} />
+          <Route path="/test/depression" element={isAuthenticated ? <TestPage /> : <Navigate to="/login" />} />
+          <Route path="/therapists" element={isAuthenticated ? <Therapists /> : <Navigate to="/login" />} />
+          <Route path="/therapist_booking" element={isAuthenticated ? <TherapistBookingPage /> : <Navigate to="/login" />} />
+          <Route path="/relaxationtools" element={isAuthenticated ? <RelaxationToolsPage /> : <Navigate to="/login" />} />
+          <Route path="/communityforum" element={isAuthenticated ? <CommunityForum /> : <Navigate to="/login" />} />
+          <Route path="/tabpage" element={isAuthenticated ? <TabPage /> : <Navigate to="/login" />} />
+          <Route path="/twotabpage" element={isAuthenticated ? <TwoTabPage /> : <Navigate to="/login" />} />
+          <Route path="/chat" element={isAuthenticated ? <ChatPage /> : <Navigate to="/login" />} />
+          <Route path="/profile" element={isAuthenticated ? <ProfilePage /> : <Navigate to="/login" />} />
+          <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/dashboard" />} />
+        </Routes>
+      </Suspense>
     </div>
   );
 }

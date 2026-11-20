@@ -10,7 +10,7 @@ const Navbar = () => {
   const [userProfile, setUserProfile] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
-  
+
   const backgroundClass = 'bg-gradient-to-r from-pink-300 to-[#ffc0cb]';
 
   // Fetch user profile data
@@ -23,14 +23,14 @@ const Navbar = () => {
             headers: { Authorization: `Bearer ${token}` }
           });
           console.log("User profile response:", response.data.userProfile);
-          console.log("Profile picture data:",response.data.userProfile.profilePicture);
+          console.log("Profile picture data:", response.data.userProfile.profilePicture);
           setUserProfile(response.data.userProfile);
         } catch (error) {
           console.error("Error fetching user profile:", error);
         }
       }
     };
-  
+
     fetchUserProfile();
   }, [isAuthenticated]);
 
@@ -62,7 +62,7 @@ const Navbar = () => {
   }, [location.pathname]);
   const getOptimizedImageUrl = (url, width = 300) => {
     if (!url) return null;
-    
+
     // Check if it's a Cloudinary URL
     if (url.includes('cloudinary.com')) {
       // Extract base URL and file path
@@ -72,7 +72,7 @@ const Navbar = () => {
         return `${urlParts[0]}/upload/w_${width},c_fill,g_face/${urlParts[1]}`;
       }
     }
-    
+
     // Return original URL if not cloudinary or can't parse
     return url;
   };
@@ -86,27 +86,27 @@ const Navbar = () => {
             className="focus:outline-none"
           >
             {userProfile && userProfile.profilePicture && userProfile.profilePicture.url ? (
-  <img 
-    src={getOptimizedImageUrl(userProfile.profilePicture.url, 300)} 
-    alt="profile" 
-    className="w-10 h-10 rounded-full object-cover border-2 border-white" 
-    onError={(e) => {
-      console.error("Error loading image:", e);
-      e.target.onerror = null; 
-      e.target.src = ''; // Set to default image or empty
-      e.target.className = "hidden";
-      e.target.parentNode.innerHTML = `<div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 border-2 border-white">
+              <img
+                src={getOptimizedImageUrl(userProfile.profilePicture.url, 300)}
+                alt="profile"
+                className="w-10 h-10 rounded-full object-cover border-2 border-white"
+                onError={(e) => {
+                  console.error("Error loading image:", e);
+                  e.target.onerror = null;
+                  e.target.src = ''; // Set to default image or empty
+                  e.target.className = "hidden";
+                  e.target.parentNode.innerHTML = `<div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 border-2 border-white">
         ${userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'U'}
       </div>`;
-    }}
-  />
-) : (
-  <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 border-2 border-white">
-    {userProfile && userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'U'}
-  </div>
-)}
+                }}
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 border-2 border-white">
+                {userProfile && userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'U'}
+              </div>
+            )}
           </button>
-          
+
           {/* Dropdown Menu */}
           {dropdownOpen && (
             <div className="absolute left-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-20">
@@ -115,22 +115,22 @@ const Navbar = () => {
                   <p className="text-sm font-medium text-gray-700">{userProfile.name}</p>
                 </div>
               )}
-              <NavLink 
-                to="/profile" 
+              <NavLink
+                to="/profile"
                 className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 onClick={() => setDropdownOpen(false)}
               >
                 My Profile
               </NavLink>
-              <NavLink 
-                to="/dashboard" 
+              <NavLink
+                to="/dashboard"
                 className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 onClick={() => setDropdownOpen(false)}
               >
                 Dashboard
               </NavLink>
-              <NavLink 
-                to="/settings" 
+              <NavLink
+                to="/settings"
                 className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 onClick={() => setDropdownOpen(false)}
               >
@@ -157,7 +157,7 @@ const Navbar = () => {
         >
           Home
         </NavLink>
-        
+
         <NavLink
           to='/selfassessment'
           className={({ isActive }) =>
@@ -173,17 +173,9 @@ const Navbar = () => {
             isActive ? "text-white font-bold" : "text-white hover:text-blue-200"
           }
         >
-          ChatBot
+          Chat
         </NavLink>
 
-        <NavLink
-          to='/avatarexp'
-          className={({ isActive }) =>
-            isActive ? "text-white font-bold" : "text-white hover:text-blue-200"
-          }
-        >
-          3D Avatar
-        </NavLink>
 
         <NavLink
           to='/twotabpage'

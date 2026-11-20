@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
 export default defineConfig({
-  assetsInclude: ["**/*.glb", "**/*.lottie"], // Ensure .glb & .lottie files are included
+  assetsInclude: ["**/*.lottie"],
   plugins: [
     react(),
     viteStaticCopy({

@@ -101,8 +101,8 @@ export const benefits = [
   },
   {
     id: "3",
-    title: "Interactive 3D Avatar",
-    text: "Engage with a realistic 3D avatar that responds with appropriate facial expressions and body language, creating a more human-like therapeutic experience.",
+    title: "Empathetic AI Companion",
+    text: "Engage with an emotionally intelligent AI companion that provides warm, context-aware support tailored to your thoughts and feelings.",
     backgroundUrl: "./src/assets/benefits/card-4.svg",
     iconUrl: benefitIcon4,
     imageUrl: benefitImage2,
