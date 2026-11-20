@@ -1,150 +1,148 @@
 import React from 'react';
-import Footer from "../components/Footer.jsx";
+import { DownloadOutlined, HeartFilled, SafetyCertificateFilled, CompassFilled, TeamOutlined, CheckCircleFilled } from "@ant-design/icons";
 
 const AboutUsPage = () => {
-    
-    // Function to handle PDF download (you'll need to replace with actual PDF path)
-    const handleDownloadPDF = () => {
-        // Replace '/path-to-your-pdf/sentio-user-guide.pdf' with the actual path to your PDF file
-        const pdfUrl = 'Sentio  AI With Empathy (1).pdf';
+  const handleDownloadPDF = () => {
+    const pdfUrl = 'Sentio  AI With Empathy (1).pdf';
+    const link = document.createElement('a');
+    link.href = pdfUrl;
+    link.download = 'Sentio-User-Guide.pdf';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const offerings = [
+    { title: "Empathetic AI Companion", desc: "Adaptive, emotion-aware conversations that offer a safe space whenever you need someone to talk to.", icon: "🌸" },
+    { title: "Clinical Self-Assessments", desc: "Confidential psychological evaluation tools covering depression, anxiety, trauma, and sleep.", icon: "📋" },
+    { title: "Mindfulness & Relaxation", desc: "Guided meditations, breathing exercises, and soothing soundscapes to reduce stress in real time.", icon: "🧘" },
+    { title: "Certified Therapist Booking", desc: "Direct, confidential scheduling with certified mental health professionals and counselors.", icon: "👥" },
+    { title: "Crisis Helplines", desc: "Immediate 24/7 emergency contact directory for crisis prevention and urgent emotional support.", icon: "📞" },
+    { title: "Community Forum", desc: "A moderated, supportive community to share experiences and learn from others on similar journeys.", icon: "💬" },
+    { title: "Comprehensive Resources", desc: "Curated guides, educational articles, and evidence-based coping strategies for everyday life.", icon: "📚" },
+    { title: "Personalized Mood Tracking", desc: "Insightful tracking to observe emotional patterns and celebrate your mental wellness progress.", icon: "📈" },
+  ];
+
+  const pillars = [
+    { icon: <HeartFilled className="text-pink-500 text-xl" />, title: "Radical Empathy", desc: "Every algorithm and interface is designed with compassionate care and understanding at its heart." },
+    { icon: <SafetyCertificateFilled className="text-emerald-500 text-xl" />, title: "100% Privacy First", desc: "Your mental health conversations and personal reflections belong strictly to you—never sold or shared." },
+    { icon: <CompassFilled className="text-indigo-500 text-xl" />, title: "24/7 Accessibility", desc: "Quality emotional support available on any device, anywhere, at any hour of the day or night." },
+  ];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-[#fff5f8] via-[#fff9fb] to-[#f4faff] py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-5xl mx-auto space-y-16">
         
-        // Create an anchor element and set properties
-        const link = document.createElement('a');
-        link.href = pdfUrl;
-        link.download = 'Sentio-User-Guide.pdf';
-        
-        // Append to body, click and remove
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    };
-    
-    return (
-        <>
-            <div className="w-full px-4 py-12">
-                <div className="text-center mb-10">
-                    <h1 className="text-3xl font-bold text-blue-600 mb-4">About Us</h1>
-                    <div className="w-20 h-1 bg-blue-500 mx-auto mb-8"></div>
-                </div>
-                
-                <div className="flex flex-col md:flex-row items-center">
-                    <div className="w-full md:w-2/3 mb-12 md:pr-6">
-                        <h2 className="text-2xl font-semibold mb-4 text-gray-800">Our Story</h2>
-                        <p className="text-gray-700 mb-4">
-                            Sentio was founded in 2025 by a team of hackathon enthusiasts and technology experts who recognized the need for more accessible mental healthcare. We saw how technology could bridge gaps in traditional mental health services and set out to create a platform that combines clinical expertise with innovative digital solutions.
-                        </p>
-                        <p className="text-gray-700">
-                            Today, we're proud to serve users worldwide, providing support through our comprehensive mental health platform that makes quality care available to everyone, anywhere, anytime.
-                        </p>
-                    </div>
-                    
-                    <div className="w-full md:w-1/3 flex justify-center">
-                        <div className="w-full max-w-sm p-6 rounded-2xl bg-gradient-to-br from-[#ffb6d5]/30 to-[#edf9ff] border border-pink-100 shadow-sm text-center">
-                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-pink-100 flex items-center justify-center text-2xl">
-                                🌸
-                            </div>
-                            <h3 className="text-lg font-semibold text-gray-800 mb-2">Empathetic Innovation</h3>
-                            <p className="text-sm text-gray-600">
-                                Combining emotional intelligence with digital privacy to provide round-the-clock sanctuary and care.
-                            </p>
-                        </div>
-                    </div>
-                </div>
+        {/* Header Hero Section */}
+        <div className="text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-pink-100 text-pink-700 text-xs font-semibold uppercase tracking-wider mb-3">
+            <span>Our Journey & Purpose</span>
+          </div>
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-gray-900 tracking-tight">
+            About{" "}
+            <span className="bg-gradient-to-r from-[#e91e63] to-[#845ec2] bg-clip-text text-transparent">
+              SENTIO
+            </span>
+          </h1>
+          <p className="mt-4 text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+            Transforming emotional healthcare through accessible technology, compassionate AI, and human connection.
+          </p>
+        </div>
 
-                <div className="w-full mb-12">
-                    <h2 className="text-2xl font-semibold mb-4 text-gray-800">Our Mission</h2>
-                    <p className="text-gray-700">
-                        At Sentio, we believe mental wellness should be accessible to everyone. Our mission is to break down barriers to mental healthcare by leveraging technology to provide personalized, effective, and affordable support when you need it most.
-                    </p>
-                </div>
-
-                <div className="w-full mb-12">
-                    <h2 className="text-2xl font-semibold mb-4 text-gray-800">What We Offer</h2>
-                    <p className="text-gray-700 mb-6">
-                        Our platform combines several innovative features to support your mental health journey:
-                    </p>
-                    <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-gray-700">
-                        <li className="flex items-start">
-                            <span className="text-blue-500 mr-2">•</span>
-                            <span>AI-powered chat support</span>
-                        </li>
-                        <li className="flex items-start">
-                            <span className="text-blue-500 mr-2">•</span>
-                            <span>AI-powered emotional companion</span>
-                        </li>
-                        <li className="flex items-start">
-                            <span className="text-blue-500 mr-2">•</span>
-                            <span>Mental health resources</span>
-                        </li>
-                        <li className="flex items-start">
-                            <span className="text-blue-500 mr-2">•</span>
-                            <span>Crisis helplines</span>
-                        </li>
-                        <li className="flex items-start">
-                            <span className="text-blue-500 mr-2">•</span>
-                            <span>Self-assessment tools</span>
-                        </li>
-                        <li className="flex items-start">
-                            <span className="text-blue-500 mr-2">•</span>
-                            <span>Confidential appointment booking</span>
-                        </li>
-                        <li className="flex items-start">
-                            <span className="text-blue-500 mr-2">•</span>
-                            <span>Community forum</span>
-                        </li>
-                        <li className="flex items-start">
-                            <span className="text-blue-500 mr-2">•</span>
-                            <span>Relaxation and mindfulness tools</span>
-                        </li>
-                    </ul>
-                    
-                    {/* User Guide Download Section */}
-                    <div className="mt-8 p-6 bg-red-50 rounded-lg shadow-sm">
-                        <div className="flex flex-col md:flex-row items-center justify-between">
-                            <div>
-                                <h3 className="text-xl font-semibold text-blue-700 mb-2">Need help getting started?</h3>
-                                <p className="text-gray-700">Download our comprehensive user guide to explore all features and get the most out of Sentio.</p>
-                            </div>
-                            <button 
-                                onClick={handleDownloadPDF}
-                                className="mt-4 md:mt-0 bg-blue-600 hover:bg-blue-700 text-white py-2 px-6 rounded-full transition-colors duration-300 flex items-center"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-                                </svg>
-                                Download User Guide
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="w-full mb-12">
-                    <h2 className="text-2xl font-semibold mb-4 text-gray-800">Our Plans</h2>
-                    <p className="text-gray-700 mb-4">
-                        We offer flexible options to meet different needs:
-                    </p>
-                    <ul className="space-y-3 text-gray-700">
-                        <li className="font-medium">Basic (Free): Includes 5 free sessions and access to essential resources</li>
-                        <li className="font-medium">Pro: Unlocks unlimited sessions and premium features</li>
-                        <li className="font-medium">Enterprise: Custom solutions for organizations and healthcare providers</li>
-                    </ul>
-                </div>
-
-                <div className="w-full mb-12">
-                    <h2 className="text-2xl font-semibold mb-4 text-gray-800">Our Team</h2>
-                    <p className="text-gray-700">
-                        Sentio brings together experts from various fields including software development, AI research, and user experience design. Our diverse team is united by a shared commitment to improving mental health outcomes through technology and compassion.
-                    </p>
-                </div>
-
-                <div className="text-center mt-10">
-                    <p className="text-gray-700 italic">
-                        "We envision a world where everyone has the tools and support they need for their mental wellbeing."
-                    </p>
-                </div>
+        {/* Our Story & Core Pillars */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <div className="lg:col-span-7 bg-white p-8 sm:p-10 rounded-3xl border border-pink-100/80 shadow-xs space-y-5">
+            <div className="inline-block px-3 py-1 bg-pink-50 text-pink-600 rounded-lg text-xs font-semibold">
+              Founded with Empathy
             </div>
-        </>
-    );
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900">Our Story</h2>
+            <p className="text-gray-700 leading-relaxed text-sm sm:text-base">
+              Sentio was founded in 2025 by a passionate team of mental health advocates, clinicians, and technologists who recognized that traditional mental health care is often too expensive, fragmented, or inaccessible when people need it most.
+            </p>
+            <p className="text-gray-700 leading-relaxed text-sm sm:text-base">
+              We set out to create a truly safe sanctuary—one that combines empathetic AI with clinical methodologies to ensure no one has to navigate anxiety, stress, or emotional crises alone.
+            </p>
+          </div>
+
+          <div className="lg:col-span-5 space-y-4">
+            {pillars.map((pillar, i) => (
+              <div key={i} className="p-5 bg-white rounded-2xl border border-pink-100/80 shadow-xs flex items-start gap-4">
+                <div className="p-3 bg-pink-50/70 rounded-xl flex-shrink-0">
+                  {pillar.icon}
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-900 text-base">{pillar.title}</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1 leading-snug">{pillar.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Our Mission Banner */}
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#ff9bbd] via-[#f782ab] to-[#f46698] p-8 sm:p-12 text-white shadow-md text-center">
+          <div className="relative z-10 max-w-3xl mx-auto space-y-3">
+            <span className="text-xs uppercase tracking-widest font-semibold text-white/80">Our Mission</span>
+            <h2 className="text-2xl sm:text-3xl font-black">Mental Wellness Accessible to Everyone, Everywhere.</h2>
+            <p className="text-sm sm:text-base text-white/90 leading-relaxed">
+              We believe quality emotional support is a fundamental human need. Our mission is to break down barriers of cost, stigma, and availability by leveraging empathetic digital innovation.
+            </p>
+          </div>
+        </div>
+
+        {/* What We Offer - 8 Grid Cards */}
+        <div>
+          <div className="text-center mb-8">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900">What We Offer</h2>
+            <p className="text-sm sm:text-base text-gray-600 mt-2">Comprehensive tools tailored to your unique healing journey.</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {offerings.map((item, i) => (
+              <div
+                key={i}
+                className="bg-white p-6 rounded-2xl border border-pink-100/80 shadow-xs hover:shadow-md hover:-translate-y-1 transition-all duration-200 flex flex-col justify-between"
+              >
+                <div>
+                  <span className="text-3xl mb-3 block">{item.icon}</span>
+                  <h3 className="font-bold text-gray-900 text-base mb-1">{item.title}</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 leading-relaxed">{item.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Download Guide Card */}
+        <div className="bg-white rounded-3xl border border-pink-200 p-8 sm:p-10 shadow-xs flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="space-y-2 text-center md:text-left">
+            <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Explore Sentio's Features</h3>
+            <p className="text-sm text-gray-600 max-w-xl">
+              Get an in-depth walkthrough of our platform tools, psychological assessment methods, and clinical safety measures.
+            </p>
+          </div>
+          <button
+            onClick={handleDownloadPDF}
+            className="flex-shrink-0 inline-flex items-center gap-2 px-6 py-3.5 rounded-full bg-[#f64a8a] hover:bg-pink-600 text-white font-semibold text-sm shadow-md transition-all duration-200 hover:scale-105"
+          >
+            <DownloadOutlined />
+            <span>Download Sentio Guide</span>
+          </button>
+        </div>
+
+        {/* Inspiring Quote */}
+        <div className="text-center py-6">
+          <p className="text-base sm:text-lg italic text-gray-700 font-medium max-w-2xl mx-auto">
+            "We envision a world where everyone has the tools, empathy, and safe space they need to thrive."
+          </p>
+          <span className="text-xs font-semibold text-[#f64a8a] uppercase tracking-wider mt-2 block">
+            — The Sentio Team
+          </span>
+        </div>
+
+      </div>
+    </div>
+  );
 };
 
 export default AboutUsPage;

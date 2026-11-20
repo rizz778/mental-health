@@ -1,4 +1,6 @@
-@import "tailwindcss";.typing-effect {
+@import "tailwindcss";
+
+.typing-effect {
   display: inline-block;
   overflow: hidden;
   border-right: 0.15em solid white; /* Cursor */

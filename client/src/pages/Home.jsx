@@ -34,14 +34,14 @@ const Home = () => {
   return (
     <section className="w-full relative overflow-hidden">
       {/* Lightweight Ambient Hero Section (Zero 3D/WebGL overhead) */}
-      <div className="w-full min-h-screen relative flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[#ffb6d5] via-[#ffd1e3] to-[#edf9ff]">
+      <div className="w-full min-h-[90vh] py-16 sm:py-24 relative flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[#ffe5ee] via-[#ffd6e5] to-[#f4faff]">
         {/* Soft, Calming Ambient Glowing Orbs in CSS */}
-        <div className="absolute -top-24 -left-24 w-96 h-96 bg-[#ff70a6]/25 rounded-full blur-3xl pointer-events-none animate-pulse" />
-        <div className="absolute top-1/4 -right-24 w-[28rem] h-[28rem] bg-[#70d6ff]/25 rounded-full blur-3xl pointer-events-none animate-pulse [animation-delay:2s]" />
-        <div className="absolute -bottom-24 left-1/3 w-[32rem] h-[32rem] bg-[#e7c6ff]/35 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -top-24 -left-24 w-96 h-96 bg-[#ff70a6]/20 rounded-full blur-3xl pointer-events-none animate-pulse" />
+        <div className="absolute top-1/4 -right-24 w-[28rem] h-[28rem] bg-[#70d6ff]/20 rounded-full blur-3xl pointer-events-none animate-pulse [animation-delay:2s]" />
+        <div className="absolute -bottom-24 left-1/3 w-[32rem] h-[32rem] bg-[#e7c6ff]/30 rounded-full blur-3xl pointer-events-none" />
 
         {/* Hero Card */}
-        <div className="relative z-10 flex items-center justify-center px-4">
+        <div className="relative z-10 w-full flex items-center justify-center px-4">
           <HomeInfo />
         </div>
 

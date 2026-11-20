@@ -1,7 +1,7 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import logo6 from '../assets/images/logo6.jpg';
-import axios from 'axios'; // Make sure axios is installed
+import axios from 'axios';
 
 const Navbar = () => {
   const location = useLocation();
@@ -11,9 +11,6 @@ const Navbar = () => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
-  const backgroundClass = 'bg-gradient-to-r from-pink-300 to-[#ffc0cb]';
-
-  // Fetch user profile data
   useEffect(() => {
     const fetchUserProfile = async () => {
       if (isAuthenticated) {
@@ -22,8 +19,6 @@ const Navbar = () => {
           const response = await axios.get('https://emot-chtabot-1.onrender.com/api/profile', {
             headers: { Authorization: `Bearer ${token}` }
           });
-          console.log("User profile response:", response.data.userProfile);
-          console.log("Profile picture data:", response.data.userProfile.profilePicture);
           setUserProfile(response.data.userProfile);
         } catch (error) {
           console.error("Error fetching user profile:", error);
@@ -34,7 +29,6 @@ const Navbar = () => {
     fetchUserProfile();
   }, [isAuthenticated]);
 
-  // Handle click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -48,7 +42,6 @@ const Navbar = () => {
     };
   }, []);
 
-  // Logout function
   const handleLogout = () => {
     localStorage.removeItem("token");
     setIsAuthenticated(false);
@@ -60,155 +53,153 @@ const Navbar = () => {
   useEffect(() => {
     setIsAuthenticated(!!localStorage.getItem("token"));
   }, [location.pathname]);
+
   const getOptimizedImageUrl = (url, width = 300) => {
     if (!url) return null;
-
-    // Check if it's a Cloudinary URL
     if (url.includes('cloudinary.com')) {
-      // Extract base URL and file path
       const urlParts = url.split('/upload/');
       if (urlParts.length === 2) {
-        // Add transformations between /upload/ and the rest of the path
         return `${urlParts[0]}/upload/w_${width},c_fill,g_face/${urlParts[1]}`;
       }
     }
-
-    // Return original URL if not cloudinary or can't parse
     return url;
   };
-  return (
-    <header className={`flex items-center justify-between p-4 ${backgroundClass} h-20 relative`}>
-      {/* Profile Picture & Dropdown at left corner */}
-      {isAuthenticated && (
-        <div className="absolute left-4 top-1/2 transform -translate-y-1/2 z-10" ref={dropdownRef}>
-          <button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="focus:outline-none"
-          >
-            {userProfile && userProfile.profilePicture && userProfile.profilePicture.url ? (
-              <img
-                src={getOptimizedImageUrl(userProfile.profilePicture.url, 300)}
-                alt="profile"
-                className="w-10 h-10 rounded-full object-cover border-2 border-white"
-                onError={(e) => {
-                  console.error("Error loading image:", e);
-                  e.target.onerror = null;
-                  e.target.src = ''; // Set to default image or empty
-                  e.target.className = "hidden";
-                  e.target.parentNode.innerHTML = `<div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 border-2 border-white">
-        ${userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'U'}
-      </div>`;
-                }}
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 border-2 border-white">
-                {userProfile && userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'U'}
-              </div>
-            )}
-          </button>
 
-          {/* Dropdown Menu */}
-          {dropdownOpen && (
-            <div className="absolute left-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-20">
-              {userProfile && (
-                <div className="px-4 py-2 border-b border-gray-100">
-                  <p className="text-sm font-medium text-gray-700">{userProfile.name}</p>
+  const navLinkClass = ({ isActive }) =>
+    `text-sm md:text-base font-medium px-4 py-2 rounded-full transition-all duration-200 ${
+      isActive
+        ? "bg-white text-[#f64a8a] shadow-sm font-semibold"
+        : "text-white hover:bg-white/20 hover:text-white"
+    }`;
+
+  return (
+    <header className="sticky top-0 z-50 w-full bg-gradient-to-r from-[#ff9bbd] via-[#f782ab] to-[#f46698] shadow-md backdrop-blur-md">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+        {/* Left: User Profile Icon */}
+        <div className="flex items-center min-w-[60px]" ref={dropdownRef}>
+          {isAuthenticated ? (
+            <div className="relative">
+              <button
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                className="flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-white/60 rounded-full"
+                title="Account Menu"
+              >
+                {userProfile && userProfile.profilePicture && userProfile.profilePicture.url ? (
+                  <img
+                    src={getOptimizedImageUrl(userProfile.profilePicture.url, 300)}
+                    alt="profile"
+                    className="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = '';
+                      e.target.className = "hidden";
+                      e.target.parentNode.innerHTML = `<div class="w-10 h-10 rounded-full bg-white text-[#f64a8a] font-bold flex items-center justify-center shadow-sm border-2 border-white">
+                        ${userProfile?.name ? userProfile.name.charAt(0).toUpperCase() : 'U'}
+                      </div>`;
+                    }}
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-white text-[#f64a8a] font-bold flex items-center justify-center shadow-sm border-2 border-white">
+                    {userProfile && userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'U'}
+                  </div>
+                )}
+              </button>
+
+              {dropdownOpen && (
+                <div className="absolute left-0 mt-3 w-52 bg-white rounded-xl shadow-xl py-2 z-50 border border-pink-100 animate-in fade-in slide-in-from-top-2 duration-150">
+                  {userProfile && (
+                    <div className="px-4 py-2 border-b border-gray-100">
+                      <p className="text-xs text-gray-400 font-medium">Signed in as</p>
+                      <p className="text-sm font-semibold text-gray-800 truncate">{userProfile.name}</p>
+                    </div>
+                  )}
+                  <NavLink
+                    to="/profile"
+                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-pink-50 hover:text-pink-600 transition-colors"
+                    onClick={() => setDropdownOpen(false)}
+                  >
+                    My Profile
+                  </NavLink>
+                  <NavLink
+                    to="/dashboard"
+                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-pink-50 hover:text-pink-600 transition-colors"
+                    onClick={() => setDropdownOpen(false)}
+                  >
+                    Dashboard
+                  </NavLink>
+                  <div className="border-t border-gray-100 my-1"></div>
+                  <button
+                    onClick={handleLogout}
+                    className="block w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors"
+                  >
+                    Logout
+                  </button>
                 </div>
               )}
-              <NavLink
-                to="/profile"
-                className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                onClick={() => setDropdownOpen(false)}
-              >
-                My Profile
-              </NavLink>
-              <NavLink
-                to="/dashboard"
-                className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                onClick={() => setDropdownOpen(false)}
-              >
-                Dashboard
-              </NavLink>
-              <NavLink
-                to="/settings"
-                className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                onClick={() => setDropdownOpen(false)}
-              >
-                Settings
-              </NavLink>
-              <button
-                onClick={handleLogout}
-                className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
-              >
-                Logout
-              </button>
             </div>
+          ) : (
+            <NavLink
+              to="/login"
+              className="text-white text-sm font-medium hover:bg-white/20 px-3 py-1.5 rounded-full transition-colors"
+            >
+              Sign In
+            </NavLink>
           )}
         </div>
-      )}
 
-      {/* Navigation Links (Center) */}
-      <nav className='flex gap-8 font-medium text-lg justify-center w-full'>
-        <NavLink
-          to='/'
-          className={({ isActive }) =>
-            isActive ? "text-white font-bold" : "text-white hover:text-blue-200"
-          }
-        >
+        {/* Center: Navigation Links */}
+        <nav className="hidden md:flex items-center gap-2 lg:gap-3">
+          <NavLink to="/" className={navLinkClass}>
+            Home
+          </NavLink>
+          <NavLink to="/selfassessment" className={navLinkClass}>
+            Self Assessment
+          </NavLink>
+          <NavLink to="/chat" className={navLinkClass}>
+            Chat
+          </NavLink>
+          <NavLink to="/therapists" className={navLinkClass}>
+            Therapists
+          </NavLink>
+          <NavLink to="/twotabpage" className={navLinkClass}>
+            Support Center
+          </NavLink>
+          <NavLink to="/tabpage" className={navLinkClass}>
+            Resources
+          </NavLink>
+          <NavLink to="/about" className={navLinkClass}>
+            About Us
+          </NavLink>
+        </nav>
+
+        {/* Right: Sentio Logo */}
+        <div className="flex items-center justify-end min-w-[60px]">
+          <NavLink to="/" className="flex items-center gap-2 group">
+            <img
+              src={logo6}
+              alt="Sentio Logo"
+              className="h-11 w-auto object-contain rounded-lg shadow-xs group-hover:scale-105 transition-transform"
+            />
+          </NavLink>
+        </div>
+      </div>
+
+      {/* Mobile Nav Drawer Row */}
+      <div className="md:hidden flex overflow-x-auto px-4 py-2 gap-2 border-t border-white/20 no-scrollbar">
+        <NavLink to="/" className={navLinkClass}>
           Home
         </NavLink>
-
-        <NavLink
-          to='/selfassessment'
-          className={({ isActive }) =>
-            isActive ? "text-white font-bold" : "text-white hover:text-blue-200"
-          }
-        >
-          Self Assessment
+        <NavLink to="/selfassessment" className={navLinkClass}>
+          Assessments
         </NavLink>
-
-        <NavLink
-          to='/signup'
-          className={({ isActive }) =>
-            isActive ? "text-white font-bold" : "text-white hover:text-blue-200"
-          }
-        >
+        <NavLink to="/chat" className={navLinkClass}>
           Chat
         </NavLink>
-
-
-        <NavLink
-          to='/twotabpage'
-          className={({ isActive }) =>
-            isActive ? "text-white font-bold" : "text-white hover:text-blue-200"
-          }
-        >
-          Support Center
+        <NavLink to="/therapists" className={navLinkClass}>
+          Therapists
         </NavLink>
-
-        <NavLink
-          to='/tabpage'
-          className={({ isActive }) =>
-            isActive ? "text-white font-bold" : "text-white hover:text-blue-200"
-          }
-        >
-          Resources
-        </NavLink>
-
-        <NavLink
-          to='/about'
-          className={({ isActive }) =>
-            isActive ? "text-white font-bold" : "text-white hover:text-blue-200"
-          }
-        >
-          About Us
-        </NavLink>
-      </nav>
-
-      {/* Logo (Right) */}
-      <div className='absolute left-15/16 transform -translate-x-1/2 hidden sm:block'>
-        <NavLink to='/'>
-          <img src={logo6} alt='logo' className='w-28 h-18 object-contain' />
+        <NavLink to="/about" className={navLinkClass}>
+          About
         </NavLink>
       </div>
     </header>
