@@ -3,10 +3,8 @@ import { useGLTF } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import { useDrag } from '@use-gesture/react';
 
-import DarkForestScene from '../assets/3d/forest_lighting_wip.glb';
-
 const DarkForest = (props) => {
-  const { nodes, materials } = useGLTF(DarkForestScene);
+  const { nodes, materials } = useGLTF('/forest_lighting_wip.glb');
   const meshRef = useRef();
 
   // Add drag functionality

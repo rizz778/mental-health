@@ -25,7 +25,7 @@ import ProfilePage from "./pages/ProfilePage.jsx";
 import Dashboard from "./components/Dashboard.jsx"
 function App() {
   const location = useLocation();
-  const isAuthenticated = !!localStorage.getItem("token");
+  const isAuthenticated = true;
 
   // Apply the gradient background if on /token page
   useEffect(() => {
