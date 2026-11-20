@@ -80,7 +80,7 @@ const ChatPage = () => {
     // "You are a helpful assistant. The user's profile and recent conversation are provided. Use the user's name and any relevant profile information in your responses. If the user asks for their name, use the name from the profile. Be supportive and empathetic.Reply in english by default, but change the language if the user queries in another language. Format your answer clearly and naturally, without using asterisks for emphasis. Do not include English translations or explanations in brackets. Only reply in the user's language. And if you receive a user emotion, respond in acknowledgement of that, and have emotionally supportive conversations"
     "You are a helpful assistant. The user's profile and recent conversation are provided. Use the user's name and any relevant profile information in your responses. If the user asks for their name, use the name from the profile. Be supportive and empathetic.Whenever you receive a user's current emotion, always acknowledge it explicitly in your reply, mention the emotion, and respond with empathy and support tailored to that emotion. Never ignore the user's emotion."
   );
-  const [wsUrl, setWsUrl] = useState("ws://localhost:8000");
+  const [wsUrl, setWsUrl] = useState("ws://localhost:8000/text");
   const [profileLoading, setProfileLoading] = useState(true);
   // Stats
   const [totalTokens, setTotalTokens] = useState(0);
@@ -114,7 +114,7 @@ const ChatPage = () => {
     let isMounted = true;
 
     // Open a dedicated WebSocket for emotion detection
-    ws = new WebSocket("ws://localhost:8000");
+    ws = new WebSocket("ws://localhost:8000/frame");
 
     ws.onopen = () => {
       console.log("[Emotion] WebSocket connected");
@@ -544,7 +544,7 @@ const ChatPage = () => {
 
         const setupMsg = {
           setup: {
-            model: "gemini-3.1-flash-live-preview",
+            model: "gemini-3.5-flash-lite",
             generationConfig: {
               responseModalities: ["TEXT"],
             },
@@ -998,7 +998,7 @@ const ChatPage = () => {
           wsRef.current.send(
             JSON.stringify({
               setup: {
-                model: "gemini-3.1-flash-live-preview",
+                model: "gemini-3.5-flash-lite",
                 systemContext,
                 systemInstruction: systemInstruction.trim() || undefined,
                 tools: toolsEnabled ? [{}] : undefined,

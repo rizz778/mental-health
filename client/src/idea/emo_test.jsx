@@ -8,7 +8,7 @@ const EmotionTester = () => {
 
   useEffect(() => {
     // Initialize WebSocket connection
-    const ws = new WebSocket("ws://localhost:8000");
+    const ws = new WebSocket("ws://localhost:8000/frame");
 
     ws.onopen = () => {
       console.log("WebSocket connected");
